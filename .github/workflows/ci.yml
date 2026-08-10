@@ -1,0 +1,18 @@
+name: CI (placeholder — full pipeline built at Session 5)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No build yet
+        run: |
+          echo "No application code exists yet (Session 0 — governance only)."
+          echo "This workflow is a placeholder so branch protection can require a check."
+          echo "Full pipeline (lint, static analysis, tests, security scans, SBOM) lands at Session 5."

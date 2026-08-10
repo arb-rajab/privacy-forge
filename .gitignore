@@ -1,0 +1,22 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Dependencies (populated at Session 5)
+/vendor
+/node_modules
+
+# Build artifacts
+/public/build
+/storage/*.key
+/storage/logs/*
+!/storage/logs/.gitkeep
+
+# IDE
+.idea
+.vscode
+
+# OS
+.DS_Store
+Thumbs.db
