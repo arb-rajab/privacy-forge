@@ -1,111 +1,103 @@
 # Session Handoff
 
 ## Project
-- Repository: `privacy-forge`
+- Repository: `privacy-forge` (https://github.com/arb-rajab/privacy-forge)
 - Public or private: public (flagship)
 - Product/domain: Data-privacy / consent & DSAR compliance engine
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 0 — Portfolio Governance & Technology Allocation**
-- Objective: Confirm the ledger row, learning budget, and non-goals before any architecture work begins.
+- Session number and title: **Session 1 — Project Discovery & Business Framing**
+- Objective: Validate every assumption in the draft brief with real reasoning, and produce the finalised project brief plus scope/non-goals document.
 - Status: **complete**
 
 ## Work completed
-- Confirmed framework allocation: **Vue 3 (frontend) + Laravel 11 (backend)** — verified `UNIQUE`, zero collisions against the master ledger.
-- Confirmed learning budget: exactly 2 new technologies (ABAC policy engine, OWASP ASVS L2 mapping) — at cap, not over.
-- Confirmed the two deep SDLC phases for this repo: **Requirements Analysis** and **Retirement, Handover & Disposal**.
-- Confirmed ship-ability estimate (90h) is within the 120h guideline.
-- Created repository skeleton: directory structure, licence (AGPL-3.0), `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `README.md` (status: skeleton).
-- Scaffolded the full 15-file Project Memory Pack under `docs/project-memory/`.
-- Wrote a draft `00-project-brief.md` (marked STUB — to be validated and finalised in Session 1).
-- Added GitHub issue templates (bug, feature, security), a PR template, and a CI placeholder workflow so branch protection can be enabled from day one.
-- Initialised git and made the first commit (see below).
+- Resolved three open discovery questions with the project owner:
+  - **Regulatory scope: GDPR/UK-GDPR only** (CCPA explicitly excluded — recorded with reasoning and a reconsider-trigger).
+  - **Demo strategy: public hosted instance** (higher effort, higher reviewer impact — accepted with a hard safety constraint attached).
+  - **Multi-tenancy: no** — single organisation per instance, matching the self-host model; multi-tenancy deliberately deferred to private-track direction PR02.
+- Rewrote `00-project-brief.md` in full: problem statement, users/stakeholders, and business assumptions now carry validated reasoning rather than draft placeholders.
+- Added a fifth success metric specifically covering the public-demo safety constraint (synthetic data, isolation, spend cap) — this is now a measured, re-checked-at-every-deploy requirement, not a one-off setup note.
+- Produced `01-scope-and-non-goals.md`: an 8-row non-goals table (each with a reconsider-trigger), an explicit MVP boundary checklist, a deferred-to-backlog list, and a formal "definition of v1 complete."
 
 ## Files created or changed
-- `docs/project-memory/00a-ledger-confirmation.md` — frozen governance record; Session 3 checks this before starting architecture.
-- `docs/project-memory/00-project-brief.md` — draft brief; **will be rewritten, not appended to, in Session 1**.
-- `docs/project-memory/01-scope-and-non-goals.md` through `14-maintenance-and-retirement.md` — empty templates from the standard scaffold, ready for their respective sessions.
-- `docs/SDLC-EVIDENCE.md` — empty template, populated at Session 9.
-- `README.md` — skeleton with status banner; will be rewritten at Session 9.
-- `LICENSE` — AGPL-3.0 (rationale: hostable application, not a library — recorded so this isn't silently changed later).
-- `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md` — standard governance docs.
-- `.github/workflows/ci.yml` — placeholder only; full pipeline (lint, static analysis, tests, security scans, SBOM) is a Session 5 deliverable.
-- `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/*.yml` — contribution scaffolding.
-- `.gitignore` — standard Laravel/Node exclusions plus `.env`.
-- `scaffold-memory-pack.sh` — copied into the repo so future sessions (or other portfolio repos) can regenerate the pattern.
+- `docs/project-memory/00-project-brief.md` — rewritten in full (no draft markers remain). Supersedes the Session 0 stub entirely.
+- `docs/project-memory/01-scope-and-non-goals.md` — new. First complete non-goals table in the repo.
+- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 0 handoff.
 
 ## Decisions made
-- **Licence: AGPL-3.0**, not MIT — because this is a hostable application (per the portfolio rule: MIT for libraries/tools, AGPL for hostable apps). Should not be silently changed without a recorded reason.
-- **Framework allocation is frozen** at Vue 3 + Laravel 11. Must not be silently reversed — doing so would require reopening the entire ledger and re-checking all 12 flagship rows for new collisions.
-- **Exactly two deep SDLC phases** (Requirements, Retirement) are committed. A third should not quietly creep in during later sessions (Rule D2).
-- No formal ADR yet — ADRs begin at Session 3. This session's decisions are governance decisions, not architecture decisions, and are recorded here and in `00a-ledger-confirmation.md` instead.
+- **GDPR/UK-GDPR only, no CCPA** — must not be silently reversed without reopening the 90-hour ship-ability estimate and the Requirements Analysis scope, since CCPA's opt-out model is structurally different from GDPR's consent model, not just a translation exercise.
+- **Single organisation per instance, no multi-tenancy** — must not be silently reversed; multi-tenancy is deliberately reserved for the private-track direction PR02, and introducing it here would blur that public/private boundary and add tenant-isolation testing this repo's scope doesn't budget for.
+- **Public hosted demo instance, with a mandatory safety constraint** — the constraint (synthetic data only, isolated infra, spend cap, scoped credentials, re-verified at every deploy) is now a recorded requirement, not a suggestion. Sessions 4 (security) and 8 (deployment) must both explicitly satisfy it; neither should treat it as already handled by the other.
+- These three decisions are recorded here and in the brief itself; they are not yet ADRs (ADRs begin at Session 3) but should be promoted to ADR-0001 through ADR-0003 at that point rather than re-litigated.
 
 ## Validation performed
-- Commands run: `bash -n scaffold-memory-pack.sh` (syntax check, passed), `git status`, `git log`.
-- Tests run and results: none applicable — no application code exists yet.
-- Lint / static analysis / security scan results: none applicable yet; the CI workflow is a placeholder that only checks out the repo.
-- Manual checks performed: verified LICENSE file downloaded correctly (checked header "GNU AFFERO GENERAL PUBLIC LICENSE" and footer reference to gnu.org — not just YAML frontmatter); verified all 15 memory-pack files were created; verified ledger overlap check against the master register in `00-portfolio-strategy.md`.
+- Commands run: none (this was a documentation/discovery session — no code exists yet).
+- Tests run and results: not applicable.
+- Lint / static analysis / security scan results: not applicable.
+- Manual checks performed: verified the non-goals table doesn't silently contradict the MVP boundary checklist (cross-checked line by line); verified all "Would reconsider if" triggers are concrete conditions rather than "maybe later."
 
 ## Open questions and risks
-- **Open question:** should the CCPA-support claim in the draft brief be kept in v1 scope or explicitly deferred? Needs a decision in Session 1 — currently drafted as "directional, not certified."
-- **Risk:** ABAC is a genuinely new pattern for this developer. If Session 3 architecture work reveals it's a bigger lift than expected, consider a short timeboxed spike before committing the ADR, rather than an open-ended detour (protects the 90h ship-ability estimate).
-- **Risk (portfolio-level, not repo-level):** this repo occupies one of the two "Now" slots per the WIP-limit-of-2 governance rule. Confirm with the Status Board owner that no other public-track repo is concurrently active.
-- **No blockers.** Session 1 can start immediately.
+- **No open questions remain from Session 0.** All three were resolved this session.
+- **Risk carried forward (unchanged):** ABAC is a genuinely new pattern for this developer — if Session 3 reveals more complexity than expected, use a timeboxed spike rather than an open-ended detour.
+- **Risk carried forward, now sharpened:** the public demo instance decision raises the stakes on the Session 4 threat model and Session 8 deployment work — a privacy tool whose own public demo mishandles data is a worse portfolio outcome than having no demo. This is now an explicit success metric (#5 in the brief), not just a note.
+- **No blockers.** Session 2 can start immediately.
 
 ## Next recommended session
-- Proposed session title: **Session 1 — Project Discovery & Business Framing**
-- Single objective: Validate (or revise) every assumption in the draft brief with real reasoning, and produce the finalised `00-project-brief.md` plus `01-scope-and-non-goals.md`.
-- Inputs required: this handoff; `00a-ledger-confirmation.md`; the draft `00-project-brief.md`.
-- Expected deliverables: finalised project brief (no "draft" markers remaining); scope and non-goals document; 5 concrete success metrics; explicit MVP boundary.
-- Definition of done: Gate 1→2 checklist satisfied (problem statement, target users, stakeholders, assumptions, risks, feasibility note, success metrics, MVP boundary, non-goals — all written and no longer marked draft).
+- Proposed session title: **Session 2 — Requirements and MVP Scope**
+- Single objective: Turn the validated brief and non-goals into testable requirements — user stories with acceptance criteria, numeric NFRs, a roles/permissions matrix, data classification, and the GDPR-article requirements traceability matrix.
+- Inputs required: `00-project-brief.md`, `01-scope-and-non-goals.md`, this handoff.
+- Expected deliverables: `02-requirements.md` complete per the standard template, with an RTM covering GDPR articles 6, 7, 12–15, 17, 20, and 30 at minimum.
+- Definition of done: Gate 2→3 checklist satisfied — every MVP feature has acceptance criteria, NFRs are numeric (not "should be fast"), roles/permissions matrix and data classification exist, integration requirements and constraints are written down. Since Requirements Analysis is one of this repo's two *deep* phases, this session should be expected to run longer or split (2a/2b) rather than be rushed to fit a single sitting.
 
 ## Paste-into-new-session context
 
-**Project:** privacy-forge — self-hostable consent, DSAR, and data-retention engine for small SaaS teams
+**Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 0 complete
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 1 complete, pushed to https://github.com/arb-rajab/privacy-forge
 
-**Problem being solved:** Small SaaS companies accumulate GDPR/CCPA obligations before they can afford dedicated privacy tooling or headcount, leading to ad hoc, undocumented handling of consent, data-subject requests, and retention.
+**Problem being solved:** Small SaaS companies accumulate GDPR/UK-GDPR obligations before they can afford dedicated privacy tooling or headcount, resulting in undocumented, indefensible handling of consent, data-subject requests, and retention.
 
-**Users:** Primary — a technical founder/engineering lead acting as de facto privacy officer. Secondary — the data subject using the public request portal.
+**Users:** Primary — a technical founder/engineering lead acting as de facto privacy officer, assumed to have no specialist regulatory literacy. Secondary — the data subject using the public request portal, assumed to have zero context on the deploying company's internals.
 
 **Current stack:**
 - Frontend: Vue 3 via Inertia
 - Backend: Laravel 11
 - Data: PostgreSQL, Redis, S3-compatible object storage
-- Infra: Docker Compose (to be built at Session 5), GitHub Actions
+- Infra: Docker Compose (built at Session 5), GitHub Actions
 - Testing: Pest, Playwright (planned — not yet implemented)
 
 **Architecture decisions that must not be reversed:**
-- Licence is AGPL-3.0 (hostable app, not a library).
-- Primary frontend/backend framework pair is fixed (Vue 3 + Laravel 11) — this is frozen against the portfolio-wide framework allocation ledger; changing it requires reopening ledger governance, not just a local decision.
-- Exactly two deep SDLC phases for this repo: Requirements Analysis, Retirement/Handover/Disposal. Do not let a third phase (e.g., full Operations depth) creep in — that's deliberately baseline here, since R03 (`pulsewatch`) carries that depth elsewhere in the portfolio.
+- Licence is AGPL-3.0 (hostable app, not a library) — Session 0.
+- Framework pair fixed: Vue 3 + Laravel 11, frozen against the portfolio-wide ledger — Session 0.
+- Exactly two deep SDLC phases: Requirements Analysis, Retirement/Handover & Disposal — Session 0.
+- **GDPR/UK-GDPR only, no CCPA** — Session 1.
+- **Single organisation per instance, no multi-tenancy** — Session 1.
+- **Public hosted demo instance is committed, with a mandatory safety constraint** (synthetic data only, isolated infra, spend cap, scoped credentials, re-verified every deploy) — Session 1.
 
 **Implementation state:**
-- Done: repository skeleton, licence, governance docs, empty Project Memory Pack, draft (unvalidated) project brief.
+- Done: repository skeleton, licence, governance docs, empty Project Memory Pack (except files 00–01), finalised project brief, finalised scope/non-goals.
 - In progress: nothing mid-flight.
-- Not started: everything else — no application code exists.
+- Not started: requirements document and everything downstream — no application code exists yet.
 
 **Constraints and non-goals:**
-- Max 2 new technologies for this repo (ABAC policy engine, ASVS L2 mapping) — already at that cap; do not introduce a third new technology.
-- Explicit non-goals to be finalised in this session but already anticipated: cookie-banner CMP for marketing sites, legal advice/templates, multi-jurisdiction rule packs beyond GDPR, enterprise SSO/SCIM, DPIA workflow automation.
+- Max 2 new technologies for this repo (ABAC policy engine, ASVS L2 mapping) — already at cap.
+- Full non-goals list (8 items, each with a reconsider-trigger) is in `01-scope-and-non-goals.md` — do not silently reintroduce any of: cookie-banner CMP, legal-advice content, non-GDPR jurisdiction packs, multi-tenancy, enterprise SSO/SCIM, DPIA automation, AI-generated legal-basis recommendations, or production third-party connectors.
 
 **Deep SDLC phases for this repo:** Requirements Analysis, Retirement/Handover & Disposal
-**Intentionally light phases:** Discovery (kept concise — the regulatory problem is well-understood, not something to discover from scratch) and Operations (baseline only — ops depth lives in R03 elsewhere in the portfolio)
+**Intentionally light phases:** Discovery (already concluded, deliberately concise), Operations (baseline only — depth lives in R03 `pulsewatch` elsewhere in the portfolio)
 
 **Task for this session (single objective):**
-Conduct project discovery: validate the draft problem statement, users, and assumptions; identify real risks and success metrics; define the MVP boundary and non-goals.
+Produce `02-requirements.md`: user stories with acceptance criteria for every MVP boundary item, numeric NFRs, a roles/permissions matrix, data classification table, integration requirements, constraints, and a GDPR-article requirements traceability matrix (target articles: 6, 7, 12–15, 17, 20, 30).
 
 **Definition of done:**
-- `00-project-brief.md` rewritten with no "draft" markers, every section validated with actual reasoning (not assumed).
-- `01-scope-and-non-goals.md` produced with an explicit non-goals table (reason for exclusion + condition that would reconsider it).
-- 5 concrete, checkable success metrics defined.
-- MVP boundary stated as a bullet list a reviewer could tick off.
+- Every item in the MVP boundary checklist (`01-scope-and-non-goals.md`) has at least one user story with Given/When/Then acceptance criteria.
+- Every NFR has a numeric target and a stated verification method.
+- The RTM has zero MVP features without a mapped GDPR article, and zero mapped articles without a corresponding test reference (even if the test doesn't exist yet — reference where it will live).
 
 **Files to attach or paste:**
-- `docs/project-memory/00-project-brief.md` (current draft)
-- `docs/project-memory/00a-ledger-confirmation.md`
+- `docs/project-memory/00-project-brief.md`
+- `docs/project-memory/01-scope-and-non-goals.md`
 - `docs/project-memory/12-session-handoff.md` (this file)
 
-**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not expand the deep-SDLC-phase count beyond two. Ask before introducing any new dependency or scope item not already anticipated above.
+**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not expand the deep-SDLC-phase count beyond two. Do not reopen the GDPR-only, single-tenant, or public-demo decisions — treat them as settled unless the project owner explicitly reopens them. Ask before introducing any new dependency or scope item not already anticipated above.
