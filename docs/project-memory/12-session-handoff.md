@@ -7,58 +7,61 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 1 — Project Discovery & Business Framing**
-- Objective: Validate every assumption in the draft brief with real reasoning, and produce the finalised project brief plus scope/non-goals document.
+- Session number and title: **Session 2 — Requirements and MVP Scope**
+- Objective: Turn the validated brief and non-goals into testable requirements — user stories with acceptance criteria, numeric NFRs, a roles/permissions matrix, data classification, and the GDPR-article requirements traceability matrix.
 - Status: **complete**
 
 ## Work completed
-- Resolved three open discovery questions with the project owner:
-  - **Regulatory scope: GDPR/UK-GDPR only** (CCPA explicitly excluded — recorded with reasoning and a reconsider-trigger).
-  - **Demo strategy: public hosted instance** (higher effort, higher reviewer impact — accepted with a hard safety constraint attached).
-  - **Multi-tenancy: no** — single organisation per instance, matching the self-host model; multi-tenancy deliberately deferred to private-track direction PR02.
-- Rewrote `00-project-brief.md` in full: problem statement, users/stakeholders, and business assumptions now carry validated reasoning rather than draft placeholders.
-- Added a fifth success metric specifically covering the public-demo safety constraint (synthetic data, isolation, spend cap) — this is now a measured, re-checked-at-every-deploy requirement, not a one-off setup note.
-- Produced `01-scope-and-non-goals.md`: an 8-row non-goals table (each with a reconsider-trigger), an explicit MVP boundary checklist, a deferred-to-backlog list, and a formal "definition of v1 complete."
+- Produced the full roles and permissions matrix (Owner, Privacy Manager, Support Staff, Data Subject, Connector) with an explicit note that Privacy Managers cannot approve their own erasure action unassisted (a deliberate separation-of-duties decision, flagged forward to ABAC design in Session 3).
+- Wrote 15 user stories (US-001–US-015) covering every MVP boundary item from `01-scope-and-non-goals.md`, each with Given/When/Then acceptance criteria.
+- Derived 20 functional requirements (FR-001–FR-020) directly from the user stories, each with a priority and a named (even if not-yet-built) verification location.
+- Defined 11 numeric NFRs (NFR-001–NFR-011) — every one has a measurable target and a verification method; none are qualitative ("should be fast").
+- Produced the data classification table across all 8 data elements the system will hold, including the explicit "synthetic — not personal data at all" classification for demo seed data.
+- Documented integration requirements: the connector webhook contract, with an explicit statement that no real third-party connector ships in v1.
+- Produced the **GDPR Article Requirements Traceability Matrix** — the deep-phase centrepiece — covering Articles 5(1)(e), 5(2)/24, 6, 7, 12, 13/14, 15, 17, 20, and 30, each mapped to specific FRs and a named test location.
+- Ran the RTM completeness check by hand: confirmed zero MVP features (FR-001–018) are untraced, and zero listed articles lack a mapped FR and named test.
 
 ## Files created or changed
-- `docs/project-memory/00-project-brief.md` — rewritten in full (no draft markers remain). Supersedes the Session 0 stub entirely.
-- `docs/project-memory/01-scope-and-non-goals.md` — new. First complete non-goals table in the repo.
-- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 0 handoff.
+- `docs/project-memory/02-requirements.md` — new, full deep-phase requirements document (roles matrix, 15 user stories, 20 FRs, 11 NFRs, data classification, integration requirements, constraints, GDPR RTM).
+- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 1 handoff.
 
 ## Decisions made
-- **GDPR/UK-GDPR only, no CCPA** — must not be silently reversed without reopening the 90-hour ship-ability estimate and the Requirements Analysis scope, since CCPA's opt-out model is structurally different from GDPR's consent model, not just a translation exercise.
-- **Single organisation per instance, no multi-tenancy** — must not be silently reversed; multi-tenancy is deliberately reserved for the private-track direction PR02, and introducing it here would blur that public/private boundary and add tenant-isolation testing this repo's scope doesn't budget for.
-- **Public hosted demo instance, with a mandatory safety constraint** — the constraint (synthetic data only, isolated infra, spend cap, scoped credentials, re-verified at every deploy) is now a recorded requirement, not a suggestion. Sessions 4 (security) and 8 (deployment) must both explicitly satisfy it; neither should treat it as already handled by the other.
-- These three decisions are recorded here and in the brief itself; they are not yet ADRs (ADRs begin at Session 3) but should be promoted to ADR-0001 through ADR-0003 at that point rather than re-litigated.
+- **Separation of duties on erasure approval** (implicit in the Privacy Manager row of the roles matrix): a Privacy Manager cannot approve their own DSAR erasure action without a second reviewer. This is a new decision not previously recorded — should be promoted to ADR-0004 or folded into the ABAC ADR at Session 3, not silently dropped.
+- **No automated ID-verification provider in v1** (FR-020) — confirmed as staying a documented non-goal rather than being quietly added back now that requirements are being written in detail. Revisit trigger already recorded in `01-scope-and-non-goals.md`.
+- **Retention dry-run and real execution must share identical selection logic** (FR-012, US-011) — this is a testability decision with architectural weight: it means the retention engine cannot special-case dry-run behaviour at the query level, only at the side-effect level. Should be respected explicitly as an architecture constraint in Session 3, not rediscovered as a bug later.
+- FR numbering was corrected during drafting (an initial duplicate ID clash between the ABAC and audit-log requirements) — resolved before finalising; no downstream references existed yet, so no other document needed updating.
 
 ## Validation performed
-- Commands run: none (this was a documentation/discovery session — no code exists yet).
+- Commands run: none (still a documentation-only session — no code exists yet).
 - Tests run and results: not applicable.
 - Lint / static analysis / security scan results: not applicable.
-- Manual checks performed: verified the non-goals table doesn't silently contradict the MVP boundary checklist (cross-checked line by line); verified all "Would reconsider if" triggers are concrete conditions rather than "maybe later."
+- Manual checks performed:
+  - Cross-checked every MVP boundary checklist item in `01-scope-and-non-goals.md` against the user stories — confirmed 1:1 coverage, no boundary item without a story.
+  - Cross-checked every FR against the RTM — confirmed FR-001 through FR-018 all trace to at least one GDPR article; FR-019/020 correctly excluded as integration/non-goal items.
+  - Cross-checked every NFR for a numeric target — confirmed none are qualitative statements.
 
 ## Open questions and risks
-- **No open questions remain from Session 0.** All three were resolved this session.
-- **Risk carried forward (unchanged):** ABAC is a genuinely new pattern for this developer — if Session 3 reveals more complexity than expected, use a timeboxed spike rather than an open-ended detour.
-- **Risk carried forward, now sharpened:** the public demo instance decision raises the stakes on the Session 4 threat model and Session 8 deployment work — a privacy tool whose own public demo mishandles data is a worse portfolio outcome than having no demo. This is now an explicit success metric (#5 in the brief), not just a note.
-- **No blockers.** Session 2 can start immediately.
+- **Open question:** should the separation-of-duties rule on erasure approval (Privacy Manager cannot self-approve) also apply to export approval, or is erasure's irreversibility the reason it's singled out? Needs a decision in Session 3 when the ABAC policy set is actually designed.
+- **Risk carried forward:** ABAC is still a new pattern for this developer, and it now has more surface area than at Session 1 (5 roles, multiple sensitive-action types, an explicit separation-of-duties case). If Session 3 reveals this is materially bigger than expected, use a timeboxed spike rather than an open-ended detour — this is now a more concrete risk than it was at Session 1, not a new one.
+- **Risk carried forward, unchanged:** the public demo instance's safety constraint (FR-018, NFR-010) is now doubly load-bearing — it appears in both the FR table and the NFR table — which is intentional (it should be very hard to forget), but Sessions 4 and 8 must both still treat it as their responsibility, not each other's.
+- **No blockers.** Session 3 can start immediately.
 
 ## Next recommended session
-- Proposed session title: **Session 2 — Requirements and MVP Scope**
-- Single objective: Turn the validated brief and non-goals into testable requirements — user stories with acceptance criteria, numeric NFRs, a roles/permissions matrix, data classification, and the GDPR-article requirements traceability matrix.
-- Inputs required: `00-project-brief.md`, `01-scope-and-non-goals.md`, this handoff.
-- Expected deliverables: `02-requirements.md` complete per the standard template, with an RTM covering GDPR articles 6, 7, 12–15, 17, 20, and 30 at minimum.
-- Definition of done: Gate 2→3 checklist satisfied — every MVP feature has acceptance criteria, NFRs are numeric (not "should be fast"), roles/permissions matrix and data classification exist, integration requirements and constraints are written down. Since Requirements Analysis is one of this repo's two *deep* phases, this session should be expected to run longer or split (2a/2b) rather than be rushed to fit a single sitting.
+- Proposed session title: **Session 3 — Architecture, Data Design, and API Contracts** (likely to split into 3a/3b given scope)
+- Single objective: Design a structure — component boundaries, ERD, API contracts, and ADRs — that satisfies every FR and NFR above, with particular attention to the ABAC policy model, the retention dry-run/execution parity constraint, and the connector contract.
+- Inputs required: `02-requirements.md`, `01-scope-and-non-goals.md`, `00-project-brief.md`, this handoff.
+- Expected deliverables: `03-architecture.md` (system context + component diagrams, ABAC design, failure handling, backup/recovery), `04-data-model.md` (ERD covering all 8 data-classification entities), `05-api-contracts.md` (consent capture API, DSAR portal API, connector webhook contract), and ≥4 ADRs (at minimum: ABAC policy model, retention dry-run/execution parity, audit-log hash-chain design, and the separation-of-duties question above).
+- Definition of done: Gate 3→4 checklist satisfied — diagrams exist, ERD covers every entity in requirements, API contract validates, ≥4 ADRs with trade-offs recorded, scalability and failure-handling notes written, backup/recovery approach stated.
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 1 complete, pushed to https://github.com/arb-rajab/privacy-forge
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 2 complete, pushed to https://github.com/arb-rajab/privacy-forge
 
 **Problem being solved:** Small SaaS companies accumulate GDPR/UK-GDPR obligations before they can afford dedicated privacy tooling or headcount, resulting in undocumented, indefensible handling of consent, data-subject requests, and retention.
 
-**Users:** Primary — a technical founder/engineering lead acting as de facto privacy officer, assumed to have no specialist regulatory literacy. Secondary — the data subject using the public request portal, assumed to have zero context on the deploying company's internals.
+**Users:** Owner, Privacy Manager, Support Staff (internal roles); Data Subject (external, via signed links only); Connector (machine-to-machine service account). Full permissions matrix in `02-requirements.md`.
 
 **Current stack:**
 - Frontend: Vue 3 via Inertia
@@ -68,36 +71,37 @@
 - Testing: Pest, Playwright (planned — not yet implemented)
 
 **Architecture decisions that must not be reversed:**
-- Licence is AGPL-3.0 (hostable app, not a library) — Session 0.
-- Framework pair fixed: Vue 3 + Laravel 11, frozen against the portfolio-wide ledger — Session 0.
-- Exactly two deep SDLC phases: Requirements Analysis, Retirement/Handover & Disposal — Session 0.
-- **GDPR/UK-GDPR only, no CCPA** — Session 1.
-- **Single organisation per instance, no multi-tenancy** — Session 1.
-- **Public hosted demo instance is committed, with a mandatory safety constraint** (synthetic data only, isolated infra, spend cap, scoped credentials, re-verified every deploy) — Session 1.
+- Licence is AGPL-3.0; framework pair fixed (Vue 3 + Laravel 11); exactly two deep SDLC phases (Requirements Analysis, Retirement/Disposal) — Session 0.
+- GDPR/UK-GDPR only, no CCPA; single organisation per instance, no multi-tenancy; public hosted demo instance committed with a mandatory synthetic-data-only safety constraint — Session 1.
+- **Retention dry-run and real execution must share identical selection logic** (FR-012) — an architecture constraint, not just a test requirement; do not special-case dry-run at the query level.
+- **Privacy Managers cannot self-approve erasure** without a second reviewer — a separation-of-duties rule that must be reflected in the ABAC policy design, not bypassed for convenience.
+- **No automated ID-verification provider in v1** (FR-020) — manual stub only.
 
 **Implementation state:**
-- Done: repository skeleton, licence, governance docs, empty Project Memory Pack (except files 00–01), finalised project brief, finalised scope/non-goals.
+- Done: repository skeleton, licence, governance docs, finalised project brief, finalised scope/non-goals, finalised deep-phase requirements document (roles matrix, 15 user stories, 20 FRs, 11 NFRs, data classification, GDPR RTM).
 - In progress: nothing mid-flight.
-- Not started: requirements document and everything downstream — no application code exists yet.
+- Not started: architecture, data model, API contracts, ADRs, and everything downstream — no application code exists yet.
 
 **Constraints and non-goals:**
 - Max 2 new technologies for this repo (ABAC policy engine, ASVS L2 mapping) — already at cap.
-- Full non-goals list (8 items, each with a reconsider-trigger) is in `01-scope-and-non-goals.md` — do not silently reintroduce any of: cookie-banner CMP, legal-advice content, non-GDPR jurisdiction packs, multi-tenancy, enterprise SSO/SCIM, DPIA automation, AI-generated legal-basis recommendations, or production third-party connectors.
+- Full non-goals list in `01-scope-and-non-goals.md` (8 items with reconsider-triggers) — do not silently reintroduce any of them while designing architecture (e.g., don't accidentally design for multi-tenancy "just in case").
 
-**Deep SDLC phases for this repo:** Requirements Analysis, Retirement/Handover & Disposal
-**Intentionally light phases:** Discovery (already concluded, deliberately concise), Operations (baseline only — depth lives in R03 `pulsewatch` elsewhere in the portfolio)
+**Deep SDLC phases for this repo:** Requirements Analysis (now complete), Retirement/Handover & Disposal (not yet started)
+**Intentionally light phases:** Discovery (concluded), Operations (baseline only)
 
 **Task for this session (single objective):**
-Produce `02-requirements.md`: user stories with acceptance criteria for every MVP boundary item, numeric NFRs, a roles/permissions matrix, data classification table, integration requirements, constraints, and a GDPR-article requirements traceability matrix (target articles: 6, 7, 12–15, 17, 20, 30).
+Design the system architecture, data model, and API/webhook contracts that satisfy every FR and NFR in `02-requirements.md`, with ADRs covering at minimum: the ABAC policy model (including the separation-of-duties case), the retention dry-run/execution parity constraint, the audit-log hash-chain design, and the connector webhook contract shape.
 
 **Definition of done:**
-- Every item in the MVP boundary checklist (`01-scope-and-non-goals.md`) has at least one user story with Given/When/Then acceptance criteria.
-- Every NFR has a numeric target and a stated verification method.
-- The RTM has zero MVP features without a mapped GDPR article, and zero mapped articles without a corresponding test reference (even if the test doesn't exist yet — reference where it will live).
+- System context and component diagrams exist (Mermaid, in-repo).
+- ERD covers all 8 data-classification entities from `02-requirements.md`.
+- API contract (OpenAPI) validates and covers the consent capture API, DSAR portal API, and connector webhook contract.
+- At least 4 ADRs written with context, options considered, decision, trade-offs, and revisit triggers.
+- Scalability, failure-handling, and backup/recovery approach documented.
 
 **Files to attach or paste:**
-- `docs/project-memory/00-project-brief.md`
+- `docs/project-memory/02-requirements.md`
 - `docs/project-memory/01-scope-and-non-goals.md`
 - `docs/project-memory/12-session-handoff.md` (this file)
 
-**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not expand the deep-SDLC-phase count beyond two. Do not reopen the GDPR-only, single-tenant, or public-demo decisions — treat them as settled unless the project owner explicitly reopens them. Ask before introducing any new dependency or scope item not already anticipated above.
+**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not expand the deep-SDLC-phase count beyond two. Do not reopen the GDPR-only, single-tenant, or public-demo decisions. Do not design around multi-tenancy, CCPA, or automated ID verification even implicitly ("just in case") — these are settled non-goals. Ask before introducing any new dependency or scope item not already anticipated above.

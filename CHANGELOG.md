@@ -7,6 +7,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Session 2: full requirements document (deep phase) — roles/permissions
+  matrix, 15 user stories with acceptance criteria, 20 functional
+  requirements, 11 numeric NFRs, data classification for all 8 data
+  elements, connector integration requirements, and the GDPR Article
+  Requirements Traceability Matrix (Arts. 5, 6, 7, 12, 13/14, 15, 17, 20, 24,
+  30 — each mapped to specific FRs and named test locations).
 - Session 1: finalised project brief with validated business assumptions
   (GDPR/UK-GDPR only, single-tenant, public hosted demo with a mandatory
   synthetic-data safety constraint).
