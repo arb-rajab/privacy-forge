@@ -7,61 +7,66 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 2 — Requirements and MVP Scope**
-- Objective: Turn the validated brief and non-goals into testable requirements — user stories with acceptance criteria, numeric NFRs, a roles/permissions matrix, data classification, and the GDPR-article requirements traceability matrix.
+- Session number and title: **Session 3 — Architecture, Data Design, and API Contracts**
+- Objective: Design a structure — component boundaries, ERD, API contracts, and ADRs — that satisfies every FR and NFR from Session 2, resolving the ABAC design, retention parity, audit-log integrity, connector contract, and single-tenancy implementation questions carried forward from Session 2.
 - Status: **complete**
 
 ## Work completed
-- Produced the full roles and permissions matrix (Owner, Privacy Manager, Support Staff, Data Subject, Connector) with an explicit note that Privacy Managers cannot approve their own erasure action unassisted (a deliberate separation-of-duties decision, flagged forward to ABAC design in Session 3).
-- Wrote 15 user stories (US-001–US-015) covering every MVP boundary item from `01-scope-and-non-goals.md`, each with Given/When/Then acceptance criteria.
-- Derived 20 functional requirements (FR-001–FR-020) directly from the user stories, each with a priority and a named (even if not-yet-built) verification location.
-- Defined 11 numeric NFRs (NFR-001–NFR-011) — every one has a measurable target and a verification method; none are qualitative ("should be fast").
-- Produced the data classification table across all 8 data elements the system will hold, including the explicit "synthetic — not personal data at all" classification for demo seed data.
-- Documented integration requirements: the connector webhook contract, with an explicit statement that no real third-party connector ships in v1.
-- Produced the **GDPR Article Requirements Traceability Matrix** — the deep-phase centrepiece — covering Articles 5(1)(e), 5(2)/24, 6, 7, 12, 13/14, 15, 17, 20, and 30, each mapped to specific FRs and a named test location.
-- Ran the RTM completeness check by hand: confirmed zero MVP features (FR-001–018) are untraced, and zero listed articles lack a mapped FR and named test.
+- Wrote **5 ADRs** (exceeding the ≥4 gate requirement): ABAC policy model with separation-of-duties as policy data (ADR-0001); retention dry-run/execution parity via a shared selector (ADR-0002); audit-log tamper-evidence via hash chain + DB grants + external anchoring (ADR-0003); async connector webhook contract (ADR-0004); single-organisation data model with no tenant column (ADR-0005).
+- Resolved the Session 2 open question on separation of duties: it's enforced as an ABAC policy condition (`actor.id != identity_verified_by`), not a database constraint — because it needs to be auditable and independently testable, and policy versioning is more appropriate than a schema change if the rule ever needs to evolve (e.g. to three-person approval).
+- Produced `03-architecture.md`: system context diagram, container diagram, a component responsibility table with an explicit "not responsible for" column, three sequence diagrams (consent capture, DSAR lifecycle showing the partial-failure path, retention dry-run→real execution), scalability rationale (deliberately not over-engineered for a scale this product won't see), a failure-handling table, and backup/recovery design.
+- Identified and resolved a subtle correctness issue during backup design: naive indefinite backups of export bundles would quietly contradict the 72-hour signed-URL TTL promise (NFR-007) by letting the data persist in a backup archive forever. Resolved by explicitly excluding export bundles from long-retention backups while keeping audit logs and deletion certificates on the normal long-retention schedule — the opposite retention shape for the opposite reason.
+- Produced `04-data-model.md`: full ERD (14 entities) covering every data-classification element from `02-requirements.md`, an invariants table mapping each invariant to its actual enforcement mechanism (DB constraint vs. application logic vs. policy data — deliberately not conflating these), indexing rationale, and a migration/rollback approach requiring every migration's `down()` to be exercised in CI from Session 5.
+- Produced `05-api-contracts.md` plus a **hand-authored, machine-validated OpenAPI 3.1 spec** (`docs/architecture/openapi.yaml`) covering consent capture, the DSAR portal, admin actions (including the erasure-approval endpoint that surfaces ABAC denials with the deciding `policy_id`), RoPA/audit export, and the connector callback endpoint. Validated with `openapi-spec-validator` — genuinely passes, not just asserted to.
+- Documented the connector webhook/callback contract's outbound and inbound halves, including idempotency handling and an explicitly flagged anomaly case (a callback reporting a different status for an already-terminal task) carried forward to Session 4 as a threat-model item.
+- Updated `09-decision-log.md` with short-form entries for all 5 ADRs, each stating why it must not be silently reversed.
 
 ## Files created or changed
-- `docs/project-memory/02-requirements.md` — new, full deep-phase requirements document (roles matrix, 15 user stories, 20 FRs, 11 NFRs, data classification, integration requirements, constraints, GDPR RTM).
-- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 1 handoff.
+- `docs/adr/ADR-0001-abac-policy-model.md` — new
+- `docs/adr/ADR-0002-retention-dry-run-parity.md` — new
+- `docs/adr/ADR-0003-audit-log-tamper-evidence.md` — new
+- `docs/adr/ADR-0004-connector-webhook-contract.md` — new
+- `docs/adr/ADR-0005-single-organisation-data-model.md` — new
+- `docs/project-memory/03-architecture.md` — full content (was empty template)
+- `docs/project-memory/04-data-model.md` — full content (was empty template)
+- `docs/project-memory/05-api-contracts.md` — full content (was empty template)
+- `docs/architecture/openapi.yaml` — new, validated OpenAPI 3.1 spec
+- `docs/project-memory/09-decision-log.md` — full content (was empty template)
+- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 2 handoff
 
 ## Decisions made
-- **Separation of duties on erasure approval** (implicit in the Privacy Manager row of the roles matrix): a Privacy Manager cannot approve their own DSAR erasure action without a second reviewer. This is a new decision not previously recorded — should be promoted to ADR-0004 or folded into the ABAC ADR at Session 3, not silently dropped.
-- **No automated ID-verification provider in v1** (FR-020) — confirmed as staying a documented non-goal rather than being quietly added back now that requirements are being written in detail. Revisit trigger already recorded in `01-scope-and-non-goals.md`.
-- **Retention dry-run and real execution must share identical selection logic** (FR-012, US-011) — this is a testability decision with architectural weight: it means the retention engine cannot special-case dry-run behaviour at the query level, only at the side-effect level. Should be respected explicitly as an architecture constraint in Session 3, not rediscovered as a bug later.
-- FR numbering was corrected during drafting (an initial duplicate ID clash between the ABAC and audit-log requirements) — resolved before finalising; no downstream references existed yet, so no other document needed updating.
+All five ADRs above are now committed decisions, not proposals. In particular:
+- **ABAC separation of duties is policy data, not code** (ADR-0001) — changing the approval rule later is a policy update, not a deployment.
+- **Retention selection logic exists in exactly one place** (ADR-0002) — no future feature should add a second, "faster" selection path for either dry-run or real execution.
+- **Export bundles are excluded from long-retention backups; audit logs and certificates are not** (new decision, surfaced during architecture work, not previously recorded anywhere) — this must be carried into the Session 8 backup configuration exactly as designed, or the 72-hour TTL promise becomes false in practice even though it's true in the application layer.
+- **No tenant column exists anywhere** (ADR-0005) — must not be reintroduced "for consistency" in any future session.
 
 ## Validation performed
-- Commands run: none (still a documentation-only session — no code exists yet).
-- Tests run and results: not applicable.
-- Lint / static analysis / security scan results: not applicable.
-- Manual checks performed:
-  - Cross-checked every MVP boundary checklist item in `01-scope-and-non-goals.md` against the user stories — confirmed 1:1 coverage, no boundary item without a story.
-  - Cross-checked every FR against the RTM — confirmed FR-001 through FR-018 all trace to at least one GDPR article; FR-019/020 correctly excluded as integration/non-goal items.
-  - Cross-checked every NFR for a numeric target — confirmed none are qualitative statements.
+- Commands run: `python3 -m openapi_spec_validator docs/architecture/openapi.yaml` → `OK`.
+- Tests run and results: not applicable — no application code exists yet; this session's validation is limited to the specification artifacts it produced.
+- Lint / static analysis / security scan results: not applicable yet.
+- Manual checks performed: cross-checked every entity in `04-data-model.md`'s ERD against the 8-row data classification table in `02-requirements.md` — confirmed full coverage; cross-checked every FR/NFR from Session 2 against the architecture and ADRs — confirmed each has a corresponding design decision (none were silently dropped); confirmed the OpenAPI spec's `403` responses on ABAC-gated endpoints correctly surface `policy_id` per ADR-0001's audit requirement.
 
 ## Open questions and risks
-- **Open question:** should the separation-of-duties rule on erasure approval (Privacy Manager cannot self-approve) also apply to export approval, or is erasure's irreversibility the reason it's singled out? Needs a decision in Session 3 when the ABAC policy set is actually designed.
-- **Risk carried forward:** ABAC is still a new pattern for this developer, and it now has more surface area than at Session 1 (5 roles, multiple sensitive-action types, an explicit separation-of-duties case). If Session 3 reveals this is materially bigger than expected, use a timeboxed spike rather than an open-ended detour — this is now a more concrete risk than it was at Session 1, not a new one.
-- **Risk carried forward, unchanged:** the public demo instance's safety constraint (FR-018, NFR-010) is now doubly load-bearing — it appears in both the FR table and the NFR table — which is intentional (it should be very hard to forget), but Sessions 4 and 8 must both still treat it as their responsibility, not each other's.
-- **No blockers.** Session 3 can start immediately.
+- **Open question:** should the anomaly case (a connector callback reporting a different status for an already-terminal task) be treated purely as a logging/alerting event, or should it also automatically disable that connector pending manual review? Flagged for Session 4's threat model rather than decided here, since it's a security posture question, not an architecture question.
+- **Risk carried forward, now more concrete:** ABAC was a documented risk since Session 1; it now has a full design (ADR-0001) but is still unimplemented. If Session 6 implementation reveals the policy-condition JSON schema is harder to make genuinely general than expected, timebox a spike rather than let it sprawl — the design is sound on paper, but paper and code sometimes disagree.
+- **Risk (new, surfaced this session):** the backup/TTL interaction (export bundles vs. audit logs having opposite retention shapes) is subtle enough that a future session working on backups in isolation, without re-reading `03-architecture.md`'s Backup and Recovery section, could easily implement a single uniform backup policy "for simplicity" and quietly reintroduce the contradiction this session just resolved. Session 8 should explicitly re-read that section, not just implement backups generically.
+- **No blockers.** Session 4 can start immediately.
 
 ## Next recommended session
-- Proposed session title: **Session 3 — Architecture, Data Design, and API Contracts** (likely to split into 3a/3b given scope)
-- Single objective: Design a structure — component boundaries, ERD, API contracts, and ADRs — that satisfies every FR and NFR above, with particular attention to the ABAC policy model, the retention dry-run/execution parity constraint, and the connector contract.
-- Inputs required: `02-requirements.md`, `01-scope-and-non-goals.md`, `00-project-brief.md`, this handoff.
-- Expected deliverables: `03-architecture.md` (system context + component diagrams, ABAC design, failure handling, backup/recovery), `04-data-model.md` (ERD covering all 8 data-classification entities), `05-api-contracts.md` (consent capture API, DSAR portal API, connector webhook contract), and ≥4 ADRs (at minimum: ABAC policy model, retention dry-run/execution parity, audit-log hash-chain design, and the separation-of-duties question above).
-- Definition of done: Gate 3→4 checklist satisfied — diagrams exist, ERD covers every entity in requirements, API contract validates, ≥4 ADRs with trade-offs recorded, scalability and failure-handling notes written, backup/recovery approach stated.
+- Proposed session title: **Session 4 — Security and Privacy Design; Threat Model**
+- Single objective: Produce the STRIDE-based threat model covering every trust boundary identified so far (public consent/DSAR endpoints, the connector callback endpoint, the admin session boundary, the ABAC evaluator itself), map each threat to a mitigation and an owning test, and produce the OWASP ASVS L2 control mapping that is this repo's second learning objective.
+- Inputs required: `03-architecture.md`, `04-data-model.md`, `05-api-contracts.md`, all 5 ADRs, this handoff.
+- Expected deliverables: `06-security-threat-model.md` (assets, trust boundaries, STRIDE threats, abuse cases, authN/authZ design summary, secrets management, dependency/supply-chain controls, accepted risks with revisit triggers), plus `docs/security/asvs-mapping.md`.
+- Definition of done: Gate 4→5 checklist satisfied — trust boundaries mapped, STRIDE pass complete, abuse cases documented, every threat has an assigned mitigation, secrets-handling approach stated, data-protection decisions recorded. Must explicitly address: the connector callback anomaly case flagged above, the public-demo-instance safety constraint (FR-018/NFR-010) as a named threat category (not just an operational note), and the ABAC evaluator itself as a trust boundary (what happens if it's bypassed or misconfigured).
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 2 complete, pushed to https://github.com/arb-rajab/privacy-forge
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 3 complete, pushed to https://github.com/arb-rajab/privacy-forge
 
 **Problem being solved:** Small SaaS companies accumulate GDPR/UK-GDPR obligations before they can afford dedicated privacy tooling or headcount, resulting in undocumented, indefensible handling of consent, data-subject requests, and retention.
-
-**Users:** Owner, Privacy Manager, Support Staff (internal roles); Data Subject (external, via signed links only); Connector (machine-to-machine service account). Full permissions matrix in `02-requirements.md`.
 
 **Current stack:**
 - Frontend: Vue 3 via Inertia
@@ -69,39 +74,42 @@
 - Data: PostgreSQL, Redis, S3-compatible object storage
 - Infra: Docker Compose (built at Session 5), GitHub Actions
 - Testing: Pest, Playwright (planned — not yet implemented)
+- API: REST + OpenAPI 3.1 (validated spec at `docs/architecture/openapi.yaml`)
 
 **Architecture decisions that must not be reversed:**
-- Licence is AGPL-3.0; framework pair fixed (Vue 3 + Laravel 11); exactly two deep SDLC phases (Requirements Analysis, Retirement/Disposal) — Session 0.
-- GDPR/UK-GDPR only, no CCPA; single organisation per instance, no multi-tenancy; public hosted demo instance committed with a mandatory synthetic-data-only safety constraint — Session 1.
-- **Retention dry-run and real execution must share identical selection logic** (FR-012) — an architecture constraint, not just a test requirement; do not special-case dry-run at the query level.
-- **Privacy Managers cannot self-approve erasure** without a second reviewer — a separation-of-duties rule that must be reflected in the ABAC policy design, not bypassed for convenience.
-- **No automated ID-verification provider in v1** (FR-020) — manual stub only.
+- Licence AGPL-3.0; framework pair fixed (Vue 3 + Laravel 11); exactly two deep SDLC phases (Requirements Analysis, Retirement/Disposal) — Session 0.
+- GDPR/UK-GDPR only; single organisation per instance; public hosted demo instance with a mandatory synthetic-data-only safety constraint — Session 1.
+- Retention dry-run/execution parity via one shared selector (ADR-0002); no self-approval on erasure, enforced as ABAC policy data (ADR-0001) — Session 3.
+- Audit log: DB grants + hash chain + external anchoring, all three together, none optional (ADR-0003) — Session 3.
+- Connector integration is async/webhook-based, never synchronous (ADR-0004) — Session 3.
+- **No tenant/org column anywhere in the schema** (ADR-0005) — Session 3.
+- **Export bundles are excluded from long-retention backups; audit logs and deletion certificates are not** — a new decision from this session, must be respected explicitly at Session 8, not overridden for backup-implementation simplicity.
 
 **Implementation state:**
-- Done: repository skeleton, licence, governance docs, finalised project brief, finalised scope/non-goals, finalised deep-phase requirements document (roles matrix, 15 user stories, 20 FRs, 11 NFRs, data classification, GDPR RTM).
+- Done: repository skeleton, licence, governance docs, finalised brief, scope/non-goals, deep-phase requirements (Session 2), and now full architecture, data model, validated API contracts, and 5 ADRs (Session 3).
 - In progress: nothing mid-flight.
-- Not started: architecture, data model, API contracts, ADRs, and everything downstream — no application code exists yet.
+- Not started: threat model, environment/CI setup, and all implementation — no application code exists yet.
 
 **Constraints and non-goals:**
-- Max 2 new technologies for this repo (ABAC policy engine, ASVS L2 mapping) — already at cap.
-- Full non-goals list in `01-scope-and-non-goals.md` (8 items with reconsider-triggers) — do not silently reintroduce any of them while designing architecture (e.g., don't accidentally design for multi-tenancy "just in case").
+- Max 2 new technologies for this repo (ABAC, ASVS L2 mapping) — at cap.
+- Full non-goals list unchanged since Session 1 (`01-scope-and-non-goals.md`) — architecture work this session deliberately avoided reintroducing multi-tenancy or an event bus/message broker (that pattern belongs to R04/R07 elsewhere in the portfolio, not duplicated here).
 
-**Deep SDLC phases for this repo:** Requirements Analysis (now complete), Retirement/Handover & Disposal (not yet started)
+**Deep SDLC phases for this repo:** Requirements Analysis (complete), Retirement/Handover & Disposal (not yet started)
 **Intentionally light phases:** Discovery (concluded), Operations (baseline only)
 
 **Task for this session (single objective):**
-Design the system architecture, data model, and API/webhook contracts that satisfy every FR and NFR in `02-requirements.md`, with ADRs covering at minimum: the ABAC policy model (including the separation-of-duties case), the retention dry-run/execution parity constraint, the audit-log hash-chain design, and the connector webhook contract shape.
+Produce the STRIDE threat model and OWASP ASVS L2 mapping, explicitly covering: the connector callback anomaly case, the public demo instance's synthetic-data-only constraint as a named threat category, and the ABAC evaluator itself as a trust boundary.
 
 **Definition of done:**
-- System context and component diagrams exist (Mermaid, in-repo).
-- ERD covers all 8 data-classification entities from `02-requirements.md`.
-- API contract (OpenAPI) validates and covers the consent capture API, DSAR portal API, and connector webhook contract.
-- At least 4 ADRs written with context, options considered, decision, trade-offs, and revisit triggers.
-- Scalability, failure-handling, and backup/recovery approach documented.
+- Every trust boundary identified in `03-architecture.md`'s diagrams has at least one STRIDE threat, one mitigation, and one owning test reference.
+- `docs/security/asvs-mapping.md` exists with concrete control-to-implementation mappings, not just a checklist of unaddressed ASVS items.
+- Accepted risks are stated explicitly with revisit triggers, matching the honesty standard already set in ADR-0003.
 
 **Files to attach or paste:**
-- `docs/project-memory/02-requirements.md`
-- `docs/project-memory/01-scope-and-non-goals.md`
+- `docs/project-memory/03-architecture.md`
+- `docs/project-memory/04-data-model.md`
+- `docs/project-memory/05-api-contracts.md`
+- `docs/adr/` (all 5 files)
 - `docs/project-memory/12-session-handoff.md` (this file)
 
-**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not expand the deep-SDLC-phase count beyond two. Do not reopen the GDPR-only, single-tenant, or public-demo decisions. Do not design around multi-tenancy, CCPA, or automated ID verification even implicitly ("just in case") — these are settled non-goals. Ask before introducing any new dependency or scope item not already anticipated above.
+**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not reopen GDPR-only, single-tenant, public-demo, or any of the 5 ADR decisions — treat them as settled unless the project owner explicitly reopens them. Do not implement anything yet — this is still a design-phase session. Ask before introducing any new dependency or scope item not already anticipated above.

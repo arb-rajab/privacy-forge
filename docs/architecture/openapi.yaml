@@ -1,0 +1,405 @@
+openapi: 3.1.0
+info:
+  title: privacy-forge API
+  version: 0.1.0-draft
+  description: >
+    Consent capture, DSAR, retention, RoPA, and connector-callback API for
+    privacy-forge. This is a Session 3 design-time contract — no
+    implementation exists yet. Endpoints map to the functional requirements
+    in docs/project-memory/02-requirements.md.
+  license:
+    name: AGPL-3.0
+
+servers:
+  - url: https://{instance}/api/v1
+    variables:
+      instance:
+        default: demo.privacy-forge.example
+
+tags:
+  - name: Consent
+    description: Public consent capture (FR-001..004)
+  - name: DSAR Portal
+    description: Public data-subject request submission and status (FR-005..011)
+  - name: Admin — Purposes and Policies
+    description: Staff-only consent purpose, notice, and retention policy management
+  - name: Admin — RoPA and Audit
+    description: Staff-only compliance evidence exports (FR-014, FR-016)
+  - name: Connector Callback
+    description: Signed, connector-authenticated callback endpoint (ADR-0004)
+
+paths:
+  /consent-purposes/{purposeId}/notice:
+    get:
+      tags: [Consent]
+      summary: Get the currently published consent notice for a purpose
+      parameters:
+        - name: purposeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current notice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentNotice' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /consent:
+    post:
+      tags: [Consent]
+      summary: Capture a consent event (FR-003, US-003)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentCaptureRequest' }
+      responses:
+        '201':
+          description: Consent recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentRecord' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /consent/{consentId}/withdraw:
+    post:
+      tags: [Consent]
+      summary: Withdraw a previously given consent (FR-004, US-004)
+      parameters:
+        - name: consentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Consent withdrawn
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentRecord' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /dsar:
+    post:
+      tags: [DSAR Portal]
+      summary: Submit a data-subject request (FR-005, US-005)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DsarSubmission' }
+      responses:
+        '201':
+          description: Request accepted, pending verification
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DsarStatusToken' }
+        '429':
+          description: Rate limit exceeded (NFR-006)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /dsar/status/{signedToken}:
+    get:
+      tags: [DSAR Portal]
+      summary: Check DSAR status via a signed, time-limited link (US-005)
+      parameters:
+        - name: signedToken
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DsarStatus' }
+        '410':
+          description: Link expired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /dsar/export/{signedToken}/download:
+    get:
+      tags: [DSAR Portal]
+      summary: Download an export bundle via a signed URL (FR-010, US-008)
+      parameters:
+        - name: signedToken
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Export bundle (redirect to object storage in practice)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportBundle' }
+        '410':
+          description: >
+            Link expired — TTL never exceeds 72 hours (NFR-007); no
+            extension is possible, a new request must be submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /admin/dsar/{dsarId}/verify-identity:
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: Mark a DSAR's identity as verified (FR-007, US-006)
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: dsarId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Verified — evaluated against the dsar.identity.verify policy (ADR-0001)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DsarStatus' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+
+  /admin/dsar/{dsarId}/approve-erasure:
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        Approve erasure for a verified DSAR. Subject to the separation-of-
+        duties policy (ADR-0001): the approver must differ from the
+        identity verifier.
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: dsarId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Approved — dispatch to connectors begins
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DsarStatus' }
+        '403':
+          description: >
+            Denied by the dsar.erasure.approve policy — most commonly
+            because the approver is the same user who verified identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /admin/retention-policies/{policyId}/dry-run:
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: Preview a retention policy with no side effects (FR-012, US-011)
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Preview report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPreview' }
+
+  /admin/ropa/export:
+    get:
+      tags: [Admin — RoPA and Audit]
+      summary: Export the Record of Processing Activities (FR-016, US-013)
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [pdf, csv], default: pdf }
+      responses:
+        '200':
+          description: RoPA document
+          content:
+            application/pdf: {}
+            text/csv: {}
+
+  /admin/audit-log:
+    get:
+      tags: [Admin — RoPA and Audit]
+      summary: Query the tamper-evident audit log (FR-014, NFR-009)
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: resourceType
+          in: query
+          schema: { type: string }
+        - name: resourceId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Matching entries, in chain order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLogEntry' }
+
+  /connector-callback/{taskId}:
+    post:
+      tags: [Connector Callback]
+      summary: >
+        Connector reports the result of an export/erasure task (ADR-0004).
+        Authenticated via a connector-specific signed credential, distinct
+        from staff authentication.
+      security: [{ connectorAuth: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectorCallback' }
+      responses:
+        '200':
+          description: Callback accepted
+        '401':
+          description: Invalid or missing connector signature
+
+components:
+  securitySchemes:
+    staffAuth:
+      type: apiKey
+      in: cookie
+      name: privacy_forge_session
+      description: Session-based auth for staff users (see 06-security-threat-model.md, Session 4)
+    connectorAuth:
+      type: apiKey
+      in: header
+      name: X-Connector-Signature
+      description: HMAC signature over the request body + timestamp, per ADR-0004
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    ValidationError:
+      description: Field-level validation failure (FR-003 requires no partial record on error)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    PolicyDenied:
+      description: Denied by ABAC policy evaluation (ADR-0001) — response includes the policy_id that denied it
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  schemas:
+    ProblemDetail:
+      type: object
+      description: RFC 9457 problem details
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        policy_id:
+          type: string
+          format: uuid
+          description: Present when status is 403 and the denial came from ABAC evaluation (ADR-0001)
+
+    ConsentNotice:
+      type: object
+      properties:
+        purpose_id: { type: string, format: uuid }
+        version: { type: integer }
+        body: { type: string }
+        published_at: { type: string, format: date-time }
+
+    ConsentCaptureRequest:
+      type: object
+      required: [purpose_id, notice_version, subject_identifier]
+      properties:
+        purpose_id: { type: string, format: uuid }
+        notice_version: { type: integer }
+        subject_identifier: { type: string }
+
+    ConsentRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purpose_id: { type: string, format: uuid }
+        notice_version: { type: integer }
+        status: { type: string, enum: [active, withdrawn] }
+        given_at: { type: string, format: date-time }
+        withdrawn_at: { type: string, format: date-time, nullable: true }
+
+    DsarSubmission:
+      type: object
+      required: [request_type, subject_identifier]
+      properties:
+        request_type: { type: string, enum: [access, export, erasure] }
+        subject_identifier: { type: string }
+
+    DsarStatusToken:
+      type: object
+      properties:
+        status_url: { type: string, format: uri }
+        status: { type: string, enum: [pending_verification] }
+
+    DsarStatus:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        request_type: { type: string, enum: [access, export, erasure] }
+        status:
+          type: string
+          enum: [pending_verification, in_progress, partially_complete, complete, rejected]
+
+    ExportBundle:
+      type: object
+      properties:
+        format: { type: string, enum: [json, csv] }
+        download_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+
+    RetentionPreview:
+      type: object
+      properties:
+        policy_id: { type: string, format: uuid }
+        affected_record_count: { type: integer }
+        sample_record_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: A sample, not necessarily exhaustive for very large sets
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actor_type: { type: string, enum: [staff, connector, system] }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string, format: uuid }
+        policy_id: { type: string, format: uuid, nullable: true }
+        decision: { type: string, enum: [allow, deny] }
+        entry_hash: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ConnectorCallback:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [success, failed, partial] }
+        failure_reason: { type: string, nullable: true }
