@@ -1,4 +1,4 @@
-name: CI (placeholder — full pipeline built at Session 5)
+name: CI
 
 on:
   push:
@@ -7,12 +7,153 @@ on:
     branches: [main]
 
 jobs:
-  placeholder:
+  secrets-scan:
+    name: Secret scanning (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: No build yet
-        run: |
-          echo "No application code exists yet (Session 0 — governance only)."
-          echo "This workflow is a placeholder so branch protection can require a check."
-          echo "Full pipeline (lint, static analysis, tests, security scans, SBOM) lands at Session 5."
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  php-quality:
+    name: PHP lint, static analysis, and tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: privacy_forge_test
+          POSTGRES_USER: privacy_forge
+          POSTGRES_PASSWORD: privacy_forge_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U privacy_forge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo, pdo_pgsql, redis, zip
+          coverage: xdebug
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Lint (Laravel Pint)
+        run: composer lint
+
+      - name: Static analysis (Larastan / PHPStan)
+        run: composer analyse
+
+      - name: Run migrations (test database)
+        run: php artisan migrate --force
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PASSWORD: privacy_forge_ci
+          REDIS_HOST: 127.0.0.1
+
+      - name: Run tests (Pest)
+        run: composer test
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PASSWORD: privacy_forge_ci
+          REDIS_HOST: 127.0.0.1
+
+  js-quality:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Build (Vite)
+        run: npm run build
+
+  openapi-validate:
+    name: Validate OpenAPI contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validator
+        run: pip install openapi-spec-validator
+
+      - name: Validate docs/architecture/openapi.yaml
+        run: python -m openapi_spec_validator docs/architecture/openapi.yaml
+
+  dependency-scan:
+    name: Dependency vulnerability scan (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run osv-scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            --recursive
+            ./
+
+  codeql:
+    name: CodeQL analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    strategy:
+      matrix:
+        language: ["javascript"]
+        # PHP is not (yet, as of this writing) a first-class CodeQL
+        # language on GitHub's standard runner set. Revisit this matrix
+        # if/when CodeQL PHP support becomes generally available — noted
+        # here rather than silently only scanning JS and calling it done.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3

@@ -1,7 +1,7 @@
 # SDLC Evidence Map
 
 **Deep phases:** 2. Requirements Analysis · 8. Retirement, Handover & Disposal
-**Baseline phases:** 3. Architecture & Design · 4. Security & Privacy Design · 5. Implementation · 6. Release & Deployment
+**Baseline phases:** 3. Architecture & Design (includes security/threat modelling) · 4. Implementation · 5. Verification & Testing · 6. Release & Deployment
 **Intentionally light:** 1. Discovery & Planning (the regulatory problem is well-understood, not something to discover from scratch); 7. Operations & Maintenance (ops depth is demonstrated deeply elsewhere in the portfolio, in R03 `pulsewatch`)
 
 | Phase | Depth | Evidence | Location |
@@ -9,9 +9,9 @@
 | 1. Discovery & Planning | light | Problem statement, users, business assumptions, feasibility notes | `docs/project-memory/00-project-brief.md` |
 | 2. Requirements Analysis | **deep** | Roles matrix, 15 user stories with acceptance criteria, 20 FRs, 11 numeric NFRs, data classification, GDPR Article RTM | `docs/project-memory/02-requirements.md` |
 | 3. Architecture & Design | baseline | System context/container diagrams, 3 sequence diagrams, ERD, validated OpenAPI 3.1 spec, 6 ADRs, STRIDE threat model (20 threats across 5 trust boundaries), OWASP ASVS L2 mapping | `docs/project-memory/03-architecture.md`, `04-data-model.md`, `05-api-contracts.md`, `06-security-threat-model.md`, `docs/adr/`, `docs/architecture/openapi.yaml`, `docs/security/asvs-mapping.md` |
-| 4. Implementation | baseline | Not yet started | — |
-| 5. Verification & Testing | baseline | Not yet started | — |
-| 6. Release & Deployment | baseline | Not yet started | — |
+| 4. Implementation | baseline | Reproducible dev environment (Docker Compose), coding standards (Pint, PHPStan/Larastan level 8), secure configuration (`.env.example` with no real values, reflecting every architecture decision), Git/PR workflow (established Session 0, now has real content to govern) | `docker-compose.yml`, `pint.json`, `phpstan.neon`, `.env.example`, `CONTRIBUTING.md` |
+| 5. Verification & Testing | baseline | CI runs tests automatically (currently one environment smoke test — feature tests begin at Session 6); test framework (Pest) wired end-to-end | `tests/`, `.github/workflows/ci.yml` |
+| 6. Release & Deployment | baseline | CI pipeline: lint, static analysis, tests, gitleaks, CodeQL, osv-scanner, OpenAPI validation — all running automatically on every PR. Containerisation (Dockerfiles for app/frontend). Full deployment procedure and IaC still pending (Session 8) | `.github/workflows/ci.yml`, `docker/Dockerfile`, `docker/Dockerfile.frontend` |
 | 7. Operations & Maintenance | light | Not yet started | — |
 | 8. Retirement, Handover & Disposal | **deep** | Not yet started | — |
 

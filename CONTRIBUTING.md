@@ -28,8 +28,55 @@ first.
 
 ## Development setup
 
-Not yet available — see `docs/project-memory/12-session-handoff.md` for
-current status. A working local environment will be documented at Session 5.
+**Requirements:** Docker and Docker Compose. Nothing else needs to be
+installed on your host machine — PHP, Node, PostgreSQL, Redis, and MinIO
+all run in containers.
+
+```bash
+git clone https://github.com/arb-rajab/privacy-forge.git
+cd privacy-forge
+cp .env.example .env
+docker compose up --build
+```
+
+On first run, the `app` container installs PHP dependencies via Composer
+and generates `composer.lock`; the `frontend` container installs npm
+dependencies and generates `package-lock.json`. **Both lock files should be
+committed** once generated — see the note in `.gitignore`. Neither exists
+yet as of Session 5, because generating them requires real internet access
+to Packagist and the npm registry, which the AI session that built this
+scaffold did not have; this is recorded honestly in the Session 5 handoff
+rather than faked.
+
+Once containers are healthy:
+
+```bash
+docker compose exec app php artisan key:generate
+docker compose exec app php artisan migrate
+```
+
+The application is then available at `http://localhost:8000`, and the Vite
+dev server (for frontend hot-reload) at `http://localhost:5173`.
+
+**Health check:** `curl http://localhost:8000/up` should return `200`. If it
+doesn't, `docker compose logs app` is the first place to look.
+
+**Running tests, lint, and static analysis locally** (matches CI exactly):
+
+```bash
+docker compose exec app composer test      # Pest
+docker compose exec app composer lint      # Pint (add --fix to auto-fix)
+docker compose exec app composer analyse   # Larastan / PHPStan, level 8
+docker compose exec frontend npm run lint
+```
+
+**Validating the API contract** (`docs/architecture/openapi.yaml`) after
+changing it:
+
+```bash
+pip install openapi-spec-validator
+python -m openapi_spec_validator docs/architecture/openapi.yaml
+```
 
 ## Reporting security issues
 

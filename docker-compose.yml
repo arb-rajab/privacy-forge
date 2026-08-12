@@ -1,0 +1,113 @@
+# privacy-forge — local development stack
+#
+# This is a development reference stack, not the production deployment
+# (that's a Session 8 deliverable). It exists to satisfy Session 5's exit
+# criterion: a clean clone reaches a running application via one
+# documented command (`docker compose up`, after the setup steps in
+# CONTRIBUTING.md).
+#
+# Services map directly onto the container diagram in
+# docs/project-memory/03-architecture.md.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/var/www/html
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "echo file_get_contents('http://localhost:8000/up');"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/node_modules
+    depends_on:
+      - app
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["php", "artisan", "queue:work", "--tries=3"]
+    volumes:
+      - .:/var/www/html
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=privacy_forge
+      - POSTGRES_USER=privacy_forge
+      - POSTGRES_PASSWORD=privacy_forge_dev_only
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U privacy_forge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=privacy_forge_dev
+      - MINIO_ROOT_PASSWORD=privacy_forge_dev_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  minio-data:

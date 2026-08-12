@@ -3,15 +3,27 @@
 .env.*
 !.env.example
 
-# Dependencies (populated at Session 5)
+# Dependencies
+# NOTE: composer.lock and package-lock.json are intentionally NOT ignored —
+# this is an application, not a library, so the exact resolved dependency
+# tree must be reproducible and committed. The CI cache key in
+# .github/workflows/ci.yml depends on composer.lock existing in the repo.
 /vendor
 /node_modules
 
 # Build artifacts
 /public/build
+/public/hot
 /storage/*.key
 /storage/logs/*
 !/storage/logs/.gitkeep
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+!/storage/framework/cache/.gitkeep
+!/storage/framework/sessions/.gitkeep
+!/storage/framework/views/.gitkeep
+/build/phpstan
 
 # IDE
 .idea

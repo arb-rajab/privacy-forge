@@ -1,0 +1,22 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app
+
+    # Level 8 chosen deliberately: this is a security-sensitive project
+    # (ABAC evaluator, tamper-evident audit log) where type-safety gaps
+    # are exactly the kind of bug that shows up as a wrong authorisation
+    # decision, not just a crash. See NFR-004 in
+    # docs/project-memory/02-requirements.md.
+    level: 8
+
+    tmpDir: build/phpstan
+
+    ignoreErrors:
+        # Intentionally empty at Session 5. Any future entry here must
+        # carry a comment explaining why the suppression is safe — a
+        # silent ignoreErrors list on a security-focused codebase is
+        # exactly the kind of thing this project's own governance
+        # (ADR-0006's fail-closed philosophy) argues against doing quietly.

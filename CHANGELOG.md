@@ -7,6 +7,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Session 5: Laravel 11 + Vue 3/Inertia application skeleton (no product
+  features yet) — `artisan`, `bootstrap/app.php` wired to Laravel's built-in
+  `/up` health route, minimal Welcome page proving the Inertia pipeline
+  renders end to end.
+- Session 5: Docker Compose reference development stack (app, frontend,
+  worker, PostgreSQL, Redis, MinIO), all with health checks.
+- Session 5: real CI pipeline replacing the Session 0 placeholder — PHP
+  lint (Pint), static analysis (Larastan/PHPStan level 8), tests (Pest),
+  frontend lint/build, gitleaks, CodeQL, `osv-scanner`, and automated
+  OpenAPI contract validation on every PR.
+- Session 5: `.env.example` fully wired to prior architecture decisions
+  (export-bundle TTL, DSAR rate limit, audit-chain anchor destination,
+  demo-mode flag).
+- Session 5: one environment smoke test (health check only — feature tests
+  begin at Session 6, deliberately kept out of this session's scope).
 - Session 4: STRIDE threat model covering 5 trust boundaries and 20 threats,
   including a dedicated Demo Instance Data Safety section (scheduled resets,
   no persistent shared admin credential, connector registration compiled
