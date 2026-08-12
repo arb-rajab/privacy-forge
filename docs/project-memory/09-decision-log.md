@@ -42,6 +42,18 @@ detail.
   tracked, partial-failure-visible" requirement is not satisfiable with a
   synchronous design without reintroducing head-of-line blocking.
 
+## ADR-0006 — Fail-Closed Default for the PolicyEvaluator
+- **Date:** 2026-08-12 · **Status:** accepted · [Full ADR](../adr/ADR-0006-policy-evaluator-fail-closed.md)
+- **Decision:** the ABAC evaluator denies by default on any error (missing
+  policy, malformed condition, exception, data-access failure) — never
+  fails open. Every fail-closed denial is logged with a distinguishing
+  reason code. Modifying policies is itself added to the sensitive-action
+  registry as `policy.update`, Owner-only.
+- **Must not be silently reversed because:** fail-open on evaluator error
+  would mean a bug or outage silently grants access to the exact actions
+  (erasure, export approval, audit log access) this repository exists to
+  gate carefully — the opposite of FR-013's intent.
+
 ## ADR-0005 — Single-Organisation Data Model (No Tenant Column)
 - **Date:** 2026-08-11 · **Status:** accepted · [Full ADR](../adr/ADR-0005-single-organisation-data-model.md)
 - **Decision:** no tenant/org column anywhere in the schema; a
