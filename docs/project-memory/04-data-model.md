@@ -143,7 +143,7 @@ erDiagram
     AUDIT_LOG_ENTRY {
         uuid id PK
         uuid actor_user_id FK
-        string actor_type "staff | connector | system"
+        string actor_type "staff | connector | system | data_subject"
         string action
         string resource_type
         uuid resource_id
@@ -187,7 +187,7 @@ erDiagram
 | `RETENTION_POLICY` | Defines how long a data category is kept and what happens at expiry | retention_period_days, post_expiry_action | Organisational metadata |
 | `RETENTION_EXECUTION` | A single dry-run or real run of a policy | mode, affected_record_count | Evidentiary record |
 | `POLICY_DEFINITION` | An ABAC policy row (ADR-0001) | action_name, conditions (JSON), effect | Organisational/security metadata |
-| `AUDIT_LOG_ENTRY` | Hash-chained, tamper-evident record of every sensitive action (ADR-0003) | policy_id, decision, prev_hash, entry_hash | Evidentiary record; may reference personal data indirectly |
+| `AUDIT_LOG_ENTRY` | Hash-chained, tamper-evident record of every sensitive action (ADR-0003) | policy_id, decision, prev_hash, entry_hash | Evidentiary record; may reference personal data indirectly. `actor_type: data_subject` added at Session 6a for unauthenticated public consent actions (capture/withdraw) — the original three values had no category for an actor who is neither staff, a connector, nor the system itself. |
 
 **Demo seed data note:** every entity above, when populated in the public
 demo instance, is generated synthetically (per FR-018/NFR-010). No table has

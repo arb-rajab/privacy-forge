@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -25,6 +26,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // API responses match docs/architecture/openapi.yaml's schemas
+        // exactly — fields at the top level, no Laravel-default "data"
+        // envelope.
+        JsonResource::withoutWrapping();
     }
 }

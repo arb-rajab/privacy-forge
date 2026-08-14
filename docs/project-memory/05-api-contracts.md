@@ -55,11 +55,12 @@ contract. Grouped by tag:
 - **Admin — RoPA and Audit** (staff): RoPA export, audit log query.
 - **Connector Callback** (connector-authenticated): report task outcome.
 
-Endpoints for purpose/notice/retention-policy *creation* (as opposed to the
-approval/dry-run actions shown above) are deliberately not fully enumerated
-in the v1 OpenAPI draft — they are conventional CRUD and will be added
-mechanically once the admin SPA's exact field needs are known during
-implementation (Session 6), rather than speculatively designed now.
+Purpose and notice *creation* endpoints (`POST /admin/consent-purposes`,
+`DELETE /admin/consent-purposes/{id}`, `POST
+/admin/consent-purposes/{id}/notices`) were added mechanically at Session
+6a, once the consent-capture slice's actual field needs were known, per
+the plan described here. Retention-policy creation remains undesigned
+until the retention slice is implemented.
 
 ## Error model
 

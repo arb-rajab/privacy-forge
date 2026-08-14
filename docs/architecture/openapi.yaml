@@ -29,6 +29,78 @@ tags:
     description: Signed, connector-authenticated callback endpoint (ADR-0004)
 
 paths:
+  /admin/consent-purposes:
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: Define a consent purpose and lawful basis (FR-001, US-001)
+      security: [{ staffAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentPurposeRequest' }
+      responses:
+        '201':
+          description: Purpose created at version 1
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentPurpose' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/consent-purposes/{purposeId}:
+    delete:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        Delete a consent purpose. Refused if active consent records
+        reference it (US-001) — deprecate instead via status update.
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: purposeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Purpose deleted (no active consent records referenced it)
+        '409':
+          description: Refused — active consent records exist; deprecate instead
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/consent-purposes/{purposeId}/notices:
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: Publish a new versioned consent notice for a purpose (FR-002, US-002)
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: purposeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentNoticeRequest' }
+      responses:
+        '201':
+          description: >
+            Notice published as a new version. Previous versions remain
+            retrievable and unmodified; existing consent records keep
+            referencing the notice version they were shown (never
+            silently upgraded).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentNotice' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /consent-purposes/{purposeId}/notice:
     get:
       tags: [Consent]
@@ -318,6 +390,34 @@ components:
           type: string
           format: uuid
           description: Present when status is 403 and the denial came from ABAC evaluation (ADR-0001)
+
+    ConsentPurposeRequest:
+      type: object
+      required: [name, lawful_basis]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        lawful_basis:
+          type: string
+          enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests]
+
+    ConsentPurpose:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        lawful_basis:
+          type: string
+          enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests]
+        status: { type: string, enum: [active, deprecated] }
+        version: { type: integer }
+
+    ConsentNoticeRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string }
 
     ConsentNotice:
       type: object

@@ -6,146 +6,143 @@
 - Product/domain: Data-privacy / consent & DSAR compliance engine
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
-## Correction applied after Session 5 (before Session 6 started)
-
-Three real bugs in the Session 5 skeleton were reported and fixed before
-any feature work began:
-1. **`vendor/` shadowed by bind mount** — `app` and `worker` mounted `.:/var/www/html`
-   with no exclusion for `vendor/`, which would hide the image's installed
-   dependencies behind the host's (dependency-less) checkout at container
-   start. Fixed by adding an anonymous `/var/www/html/vendor` volume to
-   both services, mirroring the pattern `frontend` already used for
-   `node_modules`. **Verified independently** by re-reading the committed
-   `docker-compose.yml` — this didn't require trusting an external claim.
-2. **`config/` directory did not exist at all.** Session 5 built the
-   `app/`, `bootstrap/`, `routes/`, `resources/`, and `tests/` directories
-   but never created `config/` — a genuinely bare gap, not a cosmetic one.
-   Hand-written (no PHP/artisan available in the AI sandbox that built
-   this) to match Laravel 11's standard config set: `app.php`,
-   `auth.php`, `cache.php`, `database.php`, `filesystems.php`,
-   `logging.php`, `mail.php`, `queue.php`, `services.php`, `session.php`.
-   `database.php`'s Redis client now explicitly defaults to `predis`
-   (matching the real `composer.json` dependency and the fact that the
-   Dockerfile installs no `redis` PECL extension), overridable via a new
-   `REDIS_CLIENT` env var.
-3. **`.env.example` had a blank `DB_PASSWORD`** while `docker-compose.yml`'s
-   `postgres` service sets a real password (`privacy_forge_dev_only`).
-   Fixed to match.
-
-**A fourth reported item — a claimed CVE requiring a Laravel 11→12/13 major
-version bump plus cascading Pest/Larastan bumps — was declined.** It could
-not be verified: no web search tool was available, and `packagist.org`
-(where the report suggested checking) is not in this sandbox's network
-allowlist — confirmed by testing directly rather than assuming. The
-described enforcement mechanism ("Composer refuses to install packages
-with disclosed advisories by default") also doesn't match how Composer
-actually works as far as could be recalled. Given "Laravel 11" is a
-decision recorded across this project's own governance documents (the
-Session 0 ledger, multiple ADRs), silently overriding it on an unverifiable
-claim would have been worse than leaving it alone and asking for a
-verifiable source. **This remains open — see Open questions and risks.**
-
-The syntax of all new config files was checked with a bracket-balance
-heuristic only (no PHP linter is available in this sandbox); this is a
-weak check, stated as such rather than claimed as full verification. Real
-verification happens on the next `docker compose up --build` against a
-machine with actual PHP/Composer/Docker.
-
 ## Session completed
-- Session number and title: **Session 5 — Development Environment, Repository Setup, Standards, and CI Baseline**
-- Objective: Make the project reproducible and continuously verified before any feature code exists.
-- Status: **complete, with one stated limitation** (lock files not yet generated — see Open questions and risks)
+- Session number and title: **Session 6a — Real Environment Verification + Feature Slice: Consent Capture**
+- Objective: (1) actually boot the Session 5 environment for the first time and fix whatever a real `docker compose up --build` surfaces; (2) resolve the open CVE-2026-48019 question with a real source; (3) implement the consent-capture vertical slice (purposes, versioned notices, capture, withdrawal) end to end against the validated OpenAPI contract.
+- Status: **complete** — all three objectives done, 16/16 feature tests passing for real against a live Postgres instance, `composer lint` / `composer analyse` (Larastan level 8) / `npm run lint` / `npm run build` all green.
 
-## Work completed
-- Built the Laravel 11 + Vue 3/Inertia application skeleton: `artisan`, `bootstrap/app.php` (wired to Laravel 11's built-in `/up` health route rather than a custom controller), `bootstrap/providers.php`, `public/index.php`, route files (`web.php`, `api.php`, `console.php` — all deliberately near-empty, annotated with exactly which future session fills them in and against which contract), a minimal `AppServiceProvider`, an Inertia middleware stub, and a `Welcome.vue` page that proves the full request → Laravel → Inertia → Vue → rendered-HTML pipeline works.
-- Wrote `composer.json` and `package.json` reflecting the frozen stack (Laravel 11, Inertia, Pest, Larastan, Pint; Vue 3, Vite, Tailwind, ESLint, Vitest).
-- Built `docker-compose.yml`: 6 services (app, frontend, worker, postgres, redis, minio) matching the container diagram in `03-architecture.md`, each with a real health check — validated as syntactically correct YAML (`python3 -c "yaml.safe_load(...)"`), 6 services confirmed.
-- Wrote `docker/Dockerfile` and `docker/Dockerfile.frontend`. **Caught and fixed a real mistake during drafting:** the Dockerfile initially suppressed `composer install` failures with `|| true`, which directly contradicts this repository's own fail-closed philosophy (ADR-0006) — removed before finalising.
-- Replaced the Session 0 CI placeholder with a real 6-job pipeline (`secrets-scan`, `php-quality`, `js-quality`, `openapi-validate`, `dependency-scan`, `codeql`) — validated as syntactically correct YAML.
-- Wrote `.env.example` reflecting every relevant architecture decision made so far: export-bundle TTL (NFR-007), DSAR rate limit (NFR-006), audit-chain anchor destination (ADR-0003), connector retry/tolerance settings (ADR-0004), and a `DEMO_MODE` flag tied directly to the Demo Instance Data Safety controls from Session 4 — with a comment explicitly warning it is not cosmetic.
-- Added `pint.json` and `phpstan.neon` (level 8 — chosen and justified in-file specifically because this is a security-sensitive codebase, not a default choice left unexplained).
-- Wrote exactly one test, `EnvironmentHealthTest.php`, and annotated it explicitly as the boundary marker for "this is environment verification, not feature work" — Session 6 should not need to touch it.
-- **Caught and fixed a second real mistake:** initially added `composer.lock` and `package-lock.json` to `.gitignore`. This is wrong for an application (as opposed to a library) — lock files should be committed for reproducible builds, and the CI workflow's own cache key (`hashFiles('composer.lock')`) depends on the file existing in the repository. Fixed before finalising, with an explanatory comment left in `.gitignore` so this mistake isn't quietly repeated later.
-- Updated `CONTRIBUTING.md` and `README.md`'s quickstart sections with real, working commands, replacing the "not yet available" placeholders from Session 0.
-- Fixed two stale-reference bugs found while updating status text: the README's "Current phase" line still said "Session 0" (now corrected to Session 5), and `docs/SDLC-EVIDENCE.md`'s phase-summary line incorrectly named a non-existent "4. Security & Privacy Design" phase (security work was folded into Phase 3 at Session 4 — the summary line hadn't been updated to match at the time). Both fixed.
+## Part 1 — Real environment verification (this had never actually been booted)
+
+Session 5's environment was validated only by YAML/JSON syntax-checking — no PHP/Docker/network access existed in that sandbox. This session had real Docker access and ran `docker compose up --build` for the first time. Result: **it built and booted**, but several real bugs surfaced that syntax-checking could never have caught:
+
+1. **`composer.lock` / `package-lock.json` never actually reached the host.** These files are generated during the Docker image build (`composer install` / `npm install` inside `docker/Dockerfile*`), but `docker-compose.yml` bind-mounts the repo over the container's working directory at container *start* — the same shadowing issue Session 5 already fixed for `vendor/`, except that fix only added an anonymous volume for `vendor/` and `node_modules/`, not for these two individual files. Fixed by running `composer install` / `npm install` again directly against the live bind mount (`docker compose exec app composer install`, `docker compose exec frontend npm install`), which writes the lock files straight to the host. **Both are now committed** — the Session 5 documented gap is closed.
+2. **`phpunit.xml.dist` did not exist at all.** `php artisan test` failed outright with no tests able to run. Added, deliberately *not* forcing `DB_CONNECTION=sqlite` (the app image installs `pdo_pgsql` only, no `pdo_sqlite`) — tests run against the real Postgres connection via `.env`, using `RefreshDatabase` (transaction-wrapped, rolled back per test) rather than assuming an ephemeral database.
+3. **`.eslintrc.cjs` did not exist.** `npm run lint` failed outright ("ESLint couldn't find a configuration file"). Added (ESLint 8 classic config, `plugin:vue/vue3-recommended`), with `vue/multi-word-component-names` disabled to match Inertia's `Pages/` naming convention (Laravel's own Breeze starter kit does the same).
+4. **Larastan (level 8) caught a real gap**: `HandleInertiaRequests::share()`'s return type had no iterable value type. Fixed with a PHPDoc annotation.
+5. **Pint caught 7 real style violations** across 7 files (an actually-unused import in `config/logging.php`, import ordering, operator spacing). Auto-fixed.
+6. **CI bug: `dependency-scan` referenced a nonexistent action tag.** `google/osv-scanner-action/osv-scanner-action@v1` doesn't exist (only `v2.x` releases exist) — this would have failed on first push. Pinned to `@v2.5.0`.
+7. **CI bug: the `php-quality` job's Postgres service and the app's `.env` disagreed on the database name.** The CI Postgres service creates `privacy_forge_test`, but neither the migrate nor test step overrode `DB_DATABASE` away from `.env.example`'s `privacy_forge` — migrations would have failed to connect to a database that doesn't exist. Added the missing override to both steps.
+
+All of the above are committed in `d0785f2`. Verified for real, not assumed:
+- `docker compose ps` → all 6 services healthy, `app`/`worker` at **0 restarts**.
+- `curl localhost:8000/up` → **200**.
+- `docker compose exec app php artisan test` → passes.
+- `composer lint`, `composer analyse`, `npm run lint`, `npm run build` → all pass.
+- `docs/architecture/openapi.yaml` validated with the actual `openapi-spec-validator` tool CI uses (via a throwaway `python:3.12-slim` container), not just YAML-parsed.
+
+## Part 2 — CVE-2026-48019, resolved with a real source
+
+**The previously-open claim is false as applied to this repository. No action taken on `composer.json`.**
+
+Checked against the primary source — the actual GitHub Security Advisory, `GHSA-5vg9-5847-vvmq` (`laravel/framework`, CRLF injection in the default email validation rule):
+- **Affected:** Laravel `< 12.60.0` and `<= 13.9.0`.
+- **Patched:** `>= 12.60.0` and `>= 13.10.0`.
+- **Laravel 11.x is not mentioned in either range.** The advisory simply doesn't apply to this repository's frozen "Laravel 11" ledger allocation.
+
+The previous report's claim — "affects all Laravel 11.x, patched only in 12.61.1+/13.10+, requiring a bump to `laravel/framework ^12.61.1`, `pestphp/pest ^4.0`, `pestphp/pest-plugin-laravel ^4.0`, `larastan/larastan ^3.9`" — was **wrong about the affected range** (11.x was never in it) and, separately, Session 5's scepticism about the claimed Composer enforcement mechanism ("Composer 2.10+ refuses to install packages with disclosed advisories by default") was also justified — no such behavior exists; that isn't how Composer works, real or v2.10 (confirmed: this session's own `docker compose exec app composer --version` reports 2.10.2, and it installed the current `composer.lock` without any advisory-based refusal).
+
+**No ADR needed.** The Session 5 decision to decline the bump without a verifiable source was the right call, not merely a defensible one — verifying it took a real GitHub advisory fetch, which wasn't available in that sandbox. This can be considered closed; no residual risk tracked forward.
+
+## Part 3 — Session 6a feature slice: consent capture
+
+Implements US-001 through US-004 (`02-requirements.md`) end to end, against `docs/architecture/openapi.yaml`, with ADR-0003's hash-chain audit logging wired in from the start.
+
+### A contract gap was found and filled, not designed around
+
+`docs/architecture/openapi.yaml` had a `POST /consent`, a `POST /consent/{id}/withdraw`, and a `GET .../notice` — but **no endpoint at all** for a Privacy Manager to actually create a purpose or publish a notice, even though the "Admin — Purposes and Policies" tag's own description says "Staff-only consent purpose, notice, and retention policy management." `05-api-contracts.md` had already flagged this explicitly: *"Endpoints for purpose/notice/retention-policy creation ... are deliberately not fully enumerated in the v1 OpenAPI draft — they are conventional CRUD and will be added mechanically once the admin SPA's exact field needs are known during implementation (Session 6)."* This session did exactly that — added three endpoints, matching the existing spec's conventions exactly (same `staffAuth` security scheme, same `ProblemDetail` error shape):
+- `POST /admin/consent-purposes` (US-001)
+- `DELETE /admin/consent-purposes/{purposeId}` (US-001 AC2 — refuses if active consent records exist)
+- `POST /admin/consent-purposes/{purposeId}/notices` (US-002)
+
+This is additive, not a redesign, and doesn't touch any existing path or schema. `05-api-contracts.md` updated to reflect these as now implemented (retention-policy creation remains undesigned, correctly, since the retention slice doesn't exist yet).
+
+### What was built
+- **Migrations** (`database/migrations/2026_08_14_0000{01..06}_*.php`): `users` (STAFF_USER — `config/auth.php` already expected `App\Models\User`, fulfilled for the first time), `consent_purposes`, `consent_notices`, `consent_records`, `audit_log_entries`. All migrated up, rolled back, and re-migrated for real against the dev Postgres instance (the parity check `04-data-model.md` calls for).
+- **Models**: `User`, `ConsentPurpose`, `ConsentNotice`, `ConsentRecord`, `AuditLogEntry` — all UUID-keyed (`HasUuids`). `ConsentNotice`/`ConsentRecord`/`AuditLogEntry` override `save()`/`delete()` to throw `LogicException` against any mutation path that isn't the one legitimate one (new-row insert for notices/audit entries; withdrawal-only update for consent records) — enforcing the `04-data-model.md` invariants at the application layer.
+- **`App\Services\AuditLogger`** — the hash-chain half of ADR-0003. `record()` computes `entry_hash = sha256(prev_hash + canonical_json(payload))` inside a transaction with `lockForUpdate()` on the last row (by a dedicated auto-incrementing `sequence` column, not `created_at`, since Postgres timestamps aren't guaranteed distinct at sub-millisecond write speed). `verifyChain()` replays the whole chain and returns the first `sequence` at which it breaks — proven by a real test that tampers a row via a raw `DB::table()->update()` (bypassing the model entirely) and confirms `verifyChain()` both detects it and identifies the exact broken entry.
+- **Controllers/Resources/FormRequests** for all 6 endpoints (3 public consent endpoints, 3 admin purpose/notice endpoints), response shapes matching the OpenAPI schemas field-for-field (see the `JsonResource::withoutWrapping()` note below).
+- **RFC 9457 Problem Details** wired into `bootstrap/app.php`'s exception renderer, scoped to `api/*` requests only, so validation/auth/not-found errors on the API surface match `components.schemas.ProblemDetail` instead of Laravel's default shapes.
+- **Authorisation**: purpose/notice creation and deletion are **not** one of ADR-0001's enumerated ABAC "sensitive actions" (DSAR verification/erasure approval, retention execution, audit log access) — gated instead by a plain role check (`User::isPrivilegedFor('privacy_manager')`) per the roles matrix in `02-requirements.md`. Full ABAC `PolicyEvaluator` infrastructure remains Session 7 scope, as `02-requirements.md` itself already states ("Session 7" against NFR-005/US-015). This is a deliberate scope boundary, not an oversight — flagging it explicitly so it isn't mistaken for ABAC being skipped where it should apply.
+
+### A real bug caught along the way (not by a human — by actually running the tests)
+Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by default. The OpenAPI schemas specify fields at the top level with no such wrapper. First test run failed on exactly this mismatch. Fixed with `JsonResource::withoutWrapping()` in `AppServiceProvider::boot()` — a global fix, not a per-resource one, so it can't be silently forgotten on the next resource class.
+
+### Known, explicitly-flagged gap: DB-level grant revocation not implemented
+
+`04-data-model.md`'s invariants table and ADR-0003 both call for revoking `UPDATE`/`DELETE` grants at the database level on `audit_log_entries` (and, per the data model, `consent_notices`). **This is not implemented, and implementing it naively would not have worked anyway**: in the current `docker-compose`/CI setup, migrations run as the same Postgres role (`privacy_forge`) the application connects as at runtime. In PostgreSQL, a table's **owner** retains full implicit privileges regardless of `REVOKE` — a bare `REVOKE UPDATE, DELETE ON audit_log_entries FROM privacy_forge` would silently no-op against the very role that owns the table. Doing this for real requires a second, less-privileged runtime role distinct from the migration/owning role — an infrastructure change (docker-compose, `.env`, CI service config) big enough to deserve its own explicit decision, not something to bury inside a feature-slice migration.
+
+**What *is* implemented and real:** application-layer immutability (model-level `save()`/`delete()` overrides, no update/delete route exists) plus the actual hash-chain tamper-*detection* mechanism (ADR-0003 Option B) — which is what makes tampering detectable regardless of whether it's also DB-preventable, and is independently tested (see `ConsentCaptureTest`'s chain-tampering test).
+
+**Recommendation for whichever session picks this up** (likely Session 8, deployment/operations, given periodic anchoring is already scoped there): introduce a second Postgres role — an `owner`/migration role distinct from the app's runtime connection role — then the `REVOKE` becomes real. Until then, this should not be silently assumed to already provide DB-level protection.
 
 ## Files created or changed
-- Application skeleton: `artisan`, `bootstrap/app.php`, `bootstrap/providers.php`, `public/index.php`, `routes/{web,api,console}.php`, `app/Providers/AppServiceProvider.php`, `app/Http/Middleware/HandleInertiaRequests.php`, `resources/views/app.blade.php`, `resources/js/app.js`, `resources/js/Pages/Welcome.vue`, `resources/css/app.css`.
-- Build/tooling config: `composer.json`, `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `pint.json`, `phpstan.neon`, `.editorconfig`.
-- Environment: `.env.example` (full rewrite from the Session 0 stub reference — this is the first version with real, decision-linked content).
-- Containers: `docker-compose.yml`, `docker/Dockerfile`, `docker/Dockerfile.frontend`.
-- CI: `.github/workflows/ci.yml` (full replacement of the Session 0 placeholder).
-- Tests: `tests/Pest.php`, `tests/TestCase.php`, `tests/Feature/EnvironmentHealthTest.php`.
-- `storage/` directory structure with `.gitkeep` placeholders (Laravel requires these directories to exist).
-- `.gitignore` — extended for build artifacts, with the lock-file mistake caught and corrected in the same session.
-- `CONTRIBUTING.md`, `README.md` — placeholder sections replaced with real content; stale status references fixed.
-- `docs/SDLC-EVIDENCE.md` — Phases 4, 5, 6 populated with Session 5 evidence; a stale phase-name error fixed.
-- `docs/project-memory/12-session-handoff.md` — this file, replacing the Session 4 handoff.
+
+**Environment/CI fixes:** `phpunit.xml.dist`, `.eslintrc.cjs`, `composer.lock`, `package-lock.json`, `tests/Unit/.gitkeep`, `app/Http/Middleware/HandleInertiaRequests.php`, `resources/js/Pages/Welcome.vue`, `.github/workflows/ci.yml`, plus Pint auto-fixes across 7 files (see commit `d0785f2`).
+
+**Feature slice:**
+- `docs/architecture/openapi.yaml` — added `POST /admin/consent-purposes`, `DELETE /admin/consent-purposes/{purposeId}`, `POST /admin/consent-purposes/{purposeId}/notices`, and their schemas.
+- `docs/project-memory/04-data-model.md` — added `data_subject` to `AUDIT_LOG_ENTRY.actor_type` (the original 3 values had no category for an unauthenticated public consent action).
+- `docs/project-memory/05-api-contracts.md` — updated the stale "not yet enumerated" note now that these endpoints exist.
+- `database/migrations/2026_08_14_0000{01..06}_*.php`, `database/factories/{User,ConsentPurpose,ConsentNotice,ConsentRecord}Factory.php`.
+- `app/Models/{User,ConsentPurpose,ConsentNotice,ConsentRecord,AuditLogEntry}.php`.
+- `app/Services/AuditLogger.php`.
+- `app/Http/Controllers/Controller.php` (base class — didn't exist yet), `app/Http/Controllers/ConsentController.php`, `app/Http/Controllers/Admin/{ConsentPurposeController,ConsentNoticeController}.php`.
+- `app/Http/Requests/{CaptureConsentRequest,StoreConsentPurposeRequest,PublishConsentNoticeRequest}.php`.
+- `app/Http/Resources/{ConsentPurposeResource,ConsentNoticeResource,ConsentRecordResource}.php`.
+- `app/Providers/AppServiceProvider.php` — `JsonResource::withoutWrapping()`.
+- `bootstrap/app.php` — RFC 9457 Problem Details exception rendering for `api/*`.
+- `routes/api.php` — all 6 endpoints, admin routes under `Route::middleware(['web', 'auth'])` (no Sanctum dependency added; this is the built-in-only way to get session-cookie auth on `api.php`-registered routes).
+- `tests/Feature/{ConsentPurposeTest,ConsentNoticeTest,ConsentCaptureTest,ConsentWithdrawalTest}.php` — 16 tests total, all passing against a live Postgres instance.
+- `tests/Pest.php` — added `RefreshDatabase` globally for `Feature` tests.
 
 ## Decisions made
-- No new ADR this session — Session 5 is tooling and environment, not architecture. The two corrections (Dockerfile error-swallowing, gitignored lock files) are implementation mistakes caught during drafting, not decisions requiring a decision record — but both are documented here in enough detail that they shouldn't be quietly reintroduced.
-- **PHPStan/Larastan level 8**, not a lower level — justified explicitly in `phpstan.neon` itself (this is a security-sensitive codebase where type gaps become wrong authorisation decisions, not just crashes). This should not be quietly relaxed to a lower level to make CI pass faster once real code exists.
-- **Laravel's built-in `/up` health route** is used rather than a custom health-check controller — simpler, and it's exactly what the route is for. Do not build a custom health endpoint alongside it "for more detail" without a specific reason; extend the built-in one if more detail is genuinely needed.
+- **No ADR for the CVE question** — resolved as not applicable, not as a version bump. See Part 2.
+- **Purpose/notice creation is role-gated, not ABAC-gated.** Consistent with ADR-0001's own enumerated sensitive-action list, which does not include these actions. Not a new decision so much as applying an existing one correctly — flagged here so it isn't mistaken for a gap in Session 7's ABAC work later.
+- **DB-level grant revocation deferred, with a concrete reason and a concrete recommendation** (a second DB role), not silently skipped. See Part 3's flagged gap above.
 
 ## Validation performed
-- Commands run: `python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))"` → valid, 6 services confirmed by name. Same check against `.github/workflows/ci.yml` → valid, 6 jobs confirmed by name. `python3 -c "import json; json.load(open('composer.json'))"` and the same for `package.json` → both valid.
-- Tests run and results: **not run** — this sandbox has no PHP, Composer, or Docker installed, and cannot reach Packagist or the npm registry to install dependencies. This is a genuine tooling limitation of the environment this session was executed in, not a decision to skip verification. It is stated here plainly rather than glossed over.
-- Lint / static analysis / security scan results: not run, same reason as above.
-- Manual checks performed: read through the full CI workflow and Docker Compose file line-by-line checking service names, port mappings, and dependency ordering (`depends_on` with `condition: service_healthy`) against the container diagram in `03-architecture.md` — confirmed alignment. Cross-checked every ADR-referenced environment variable (export TTL, DSAR rate limit, chain anchor, connector retry settings, demo mode) actually appears in `.env.example` with an explanatory comment, not just a bare key.
+- `docker compose up --build` (real), `docker compose ps` (0 restarts on `app`/`worker`), `curl localhost:8000/up` → 200.
+- `docker compose exec app php artisan migrate` → `migrate:rollback --step=6` → `migrate` again — all clean (the up/down/up parity check `04-data-model.md` requires).
+- `docker compose exec app php artisan test` → **16/16 passed**, including a real hash-chain tamper-detection test.
+- `composer lint` (Pint) → pass. `composer analyse` (Larastan level 8) → **0 errors**.
+- `npm run lint` (ESLint) → pass. `npm run build` (Vite) → pass.
+- `docs/architecture/openapi.yaml` validated with `openapi-spec-validator` (the actual tool CI uses) via a throwaway `python:3.12-slim` container.
 
 ## Open questions and risks
-- **Unresolved: a claimed CVE against Laravel 11 (CVE-2026-48019) requiring a major-version bump to 12.61.1+, plus cascading Pest 4.0 / Larastan 3.9 bumps, was reported but not applied.** Could not be verified (no web search available; `packagist.org` unreachable from this sandbox, confirmed by testing) and the described Composer enforcement mechanism didn't match this assistant's understanding of how Composer works. **This needs a human to verify with a real, checkable source (the actual Composer error output from a real `docker compose up --build`, or a link to the advisory) before any version bump happens.** If real, this is also a decision significant enough to warrant its own ADR (a major-version bump touching the frozen "Laravel 11" ledger allocation), not a silent `composer.json` edit — flag this explicitly at the start of whichever session resolves it.
-- **Known limitation, not yet resolved:** `composer.lock` and `package-lock.json` do not exist in this repository yet. They will be generated automatically the first time `docker compose up --build` runs on a machine with real internet access — but **that first successful build must be followed by committing the generated lock files**, or every subsequent build could silently resolve different dependency versions. This is flagged as the first thing to check when Session 6 starts, not something to assume already happened.
-- **Risk:** because tests, lint, and static analysis were validated only syntactically (YAML/JSON parse-checked, and for the new PHP config files, a weak bracket-balance heuristic only — no PHP linter is available in this sandbox) and not actually executed, there is a non-zero chance the CI pipeline or the new config files have a real runtime bug that will only surface on the first real push. This should be treated as expected and low-drama — the first real `docker compose up --build` and the first CI run are effectively this session's real integration test, and their output should be read carefully, not assumed green.
-- **No blockers to starting Session 6**, but Session 6 should begin by confirming `docker compose ps` shows `app` and `worker` with 0 restarts and `curl localhost:8000/up` returns 200 on the actual pushed state before adding any feature code.
+- **DB-level grant revocation on `audit_log_entries`/`consent_notices` (ADR-0003, `04-data-model.md`) is not implemented** — needs a second, non-owning Postgres role before it's implementable at all. See Part 3. Recommend addressing at Session 8 (deployment/operations) alongside the periodic chain-anchoring job, since both are "make the audit log genuinely tamper-resistant against a privileged attacker" work.
+- **Local commits are not yet pushed to `origin/main`** — this session made real changes (environment fixes + the full consent-capture slice) but did not push, since pushing is a shared-state action outside this session's implicit authorization. Confirm with whoever resumes whether to push, and to which branch.
+- Full ABAC `PolicyEvaluator` + `policy_definitions` table remain unbuilt — unchanged from the existing Session 7 plan, not newly discovered scope.
 
 ## Next recommended session
-- Proposed session title: **Session 6a — Feature Slice: Consent Capture**
-- Single objective: Implement the first vertical slice — consent purposes, versioned notices, the capture API, and withdrawal — end to end (migration → model → ABAC-gated controller where relevant → API → minimal admin UI → tests), against the already-validated OpenAPI contract and the already-designed ABAC/audit-log architecture.
-- Inputs required: confirmation that CI is green on the current `main`; `docs/architecture/openapi.yaml`; `docs/project-memory/04-data-model.md`; ADR-0001 (ABAC) and ADR-0003 (audit log).
-- Expected deliverables: migrations for `consent_purposes`, `consent_notices`, `consent_records`; the corresponding Eloquent models; the consent capture/withdrawal endpoints matching the OpenAPI spec exactly; feature tests for both the happy path and the validation-error path (FR-003's "no partial record on error" requirement); an audit log entry written on every consent action.
-- Definition of done: Gate 6→7 is not reached until all vertical slices are done, but this slice's own done-criteria are: every US-001–US-004 acceptance criterion (from `02-requirements.md`) passes as a real, executed feature test — not just implemented and assumed correct.
+- Proposed session title: **Session 6b — Feature Slice: DSAR Intake and Identity Verification**
+- Single objective: US-005 and US-006 (`02-requirements.md`) — public DSAR submission with rate limiting (NFR-006), signed status-tracking link, and the identity-verification gate (FR-007) — this is the first slice that actually needs a real sensitive-action + ABAC decision (`dsar.identity.verify`), so it's also a natural place to start standing up the `PolicyEvaluator`/`policy_definitions` table rather than waiting for Session 7 to build it in one large batch.
+- Inputs required: `docs/architecture/openapi.yaml` (`/dsar`, `/dsar/status/{signedToken}`, `/admin/dsar/{dsarId}/verify-identity`), ADR-0001, `docs/project-memory/06-security-threat-model.md` (rate limiting, signed links).
+- Definition of done: US-005/US-006 acceptance criteria pass as real, executed Pest feature tests, matching the OpenAPI contract exactly, with every identity-verification decision audit-logged with a policy ID (the first real use of that field, which has been `null` for every audit entry so far in this slice).
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 5 complete, pushed to https://github.com/arb-rajab/privacy-forge
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 6a complete, **not yet pushed** — confirm push status before assuming `origin/main` matches local state.
 
-**Problem being solved:** Small SaaS companies accumulate GDPR/UK-GDPR obligations before they can afford dedicated privacy tooling or headcount, resulting in undocumented, indefensible handling of consent, data-subject requests, and retention.
+**Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible storage. No stack changes this session (the CVE question resolved as not-applicable, no version bumps made).
 
-**Current stack:**
-- Frontend: Vue 3 via Inertia (skeleton exists, one placeholder page)
-- Backend: Laravel 11 (skeleton exists, no business logic yet)
-- Data: PostgreSQL, Redis, S3-compatible object storage (MinIO locally) — all running in Docker Compose, no schema/migrations yet
-- Infra: Docker Compose (built this session), GitHub Actions CI (built this session, 6 jobs)
-- Testing: Pest (wired, one environment smoke test only)
-
-**Architecture decisions that must not be reversed:** all decisions from Sessions 0–4 remain in force (see prior handoffs for the full list — licence, framework pair, GDPR-only, single-tenant, public-demo-with-safety-constraint, all 6 ADRs). Nothing from Session 5 overrides any of them; Session 5 only implements the tooling those decisions will be built inside of.
+**Architecture decisions that must not be reversed:** all decisions from Sessions 0–5 remain in force. Session 6a added no new ADR and reversed nothing — it applied ADR-0001 (correctly scoping ABAC to its own enumerated sensitive-action list) and ADR-0003 (hash-chain now real; DB-grant half explicitly flagged as not yet implementable without new infrastructure).
 
 **Implementation state:**
-- Done: full governance, brief, requirements, architecture, data model, API contracts, threat model, ASVS mapping (Sessions 0–4); environment, CI, and a running-but-featureless application skeleton (Session 5).
+- Done: consent-capture vertical slice (US-001–US-004) — purposes, versioned notices, capture, withdrawal — migrations through tests, all real and passing. Environment is now genuinely booted and verified, not just syntax-checked. Lock files committed.
 - In progress: nothing mid-flight.
-- **Known gap to check first:** `composer.lock`/`package-lock.json` don't exist yet — confirm they've been generated and committed before assuming the environment is fully reproducible, and confirm CI is actually green on the pushed `main` before adding feature code.
-- Not started: all product features. No migration, model, or controller beyond the framework skeleton exists.
+- **Known gap to check first:** local commits from this session are not pushed — verify `origin/main` state before starting new work. Confirm whether to push before or as part of the next session.
+- Not started: DSAR, retention, RoPA, connector, and full ABAC/PolicyEvaluator — unchanged scope, all still ahead.
 
-**Constraints and non-goals:** unchanged since Session 1 (`01-scope-and-non-goals.md`). Max 2 new technologies for this repo — still at cap (ABAC, ASVS L2); nothing in Session 5 introduced a third.
+**Constraints and non-goals:** unchanged since Session 1. Still at the 2-new-technology cap (ABAC, ASVS L2) — this session added no third.
 
-**Deep SDLC phases for this repo:** Requirements Analysis (complete), Retirement/Handover & Disposal (not yet started)
-**Intentionally light phases:** Discovery (concluded), Operations (baseline — though note Session 8 has real work queued: demo-reset scheduling, connector-disable alerting, chain-anchor monitoring)
-
-**Task for this session (single objective):**
-Implement the consent-capture vertical slice (purposes, versioned notices, capture, withdrawal) end to end, matching `docs/architecture/openapi.yaml` exactly, with the audit log and ABAC evaluator wired in from the start rather than retrofitted.
-
-**Definition of done:**
-- Every acceptance criterion in US-001 through US-004 (`02-requirements.md`) passes as an executed, real Pest feature test.
-- The API responses match the OpenAPI spec's schemas exactly (status codes, field names, error format).
-- Every consent action writes a correctly hash-chained audit log entry (ADR-0003) — verified by a test, not assumed.
+**Task for next session (single objective):** Implement DSAR submission + identity verification (US-005, US-006) end to end, standing up the first real `PolicyEvaluator` sensitive-action (`dsar.identity.verify`) rather than waiting for a single big-bang Session 7.
 
 **Files to attach or paste:**
 - `docs/architecture/openapi.yaml`
-- `docs/project-memory/04-data-model.md`
-- `docs/adr/ADR-0001-abac-policy-model.md`, `docs/adr/ADR-0003-audit-log-tamper-evidence.md`
+- `docs/adr/ADR-0001-abac-policy-model.md`
+- `docs/project-memory/06-security-threat-model.md`
 - `docs/project-memory/12-session-handoff.md` (this file)
 
-**Ground rules:** Do not change the stack. Do not introduce a third new technology. Do not reopen any decision from Sessions 0–5. Confirm CI is green on the current `main` before writing new code — if it isn't, fixing CI is the actual Session 6 task, not a distraction from it. Ask before introducing any new dependency not already declared in `composer.json`/`package.json`.
+**Ground rules:** Do not change the stack. Do not reopen any decision from Sessions 0–5. The consent-capture slice's audit log has never had a non-null `policy_id` yet — this next slice is where that field gets exercised for real for the first time, so double-check the `AuditLogger`/`PolicyEvaluator` integration actually populates it rather than leaving it null out of habit.
