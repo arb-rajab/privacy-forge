@@ -29,6 +29,13 @@ COPY composer.json composer.lock* ./
 # failures with `|| true` — a failed install should fail the build, not be
 # hidden, matching the fail-closed stance taken throughout this project's
 # architecture (ADR-0006).
+#
+# Note: docker-compose.yml bind-mounts the repo over /var/www/html for
+# live-reload during development, which would otherwise shadow this
+# image's installed vendor/ directory with the host's (vendor-less)
+# checkout. See the anonymous `/var/www/html/vendor` volume on the app
+# and worker services — that's what prevents this COPY's work from being
+# hidden at container start.
 RUN composer install --no-interaction --no-scripts --no-progress
 
 COPY . .

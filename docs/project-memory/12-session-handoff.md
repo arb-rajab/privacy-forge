@@ -6,6 +6,51 @@
 - Product/domain: Data-privacy / consent & DSAR compliance engine
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
+## Correction applied after Session 5 (before Session 6 started)
+
+Three real bugs in the Session 5 skeleton were reported and fixed before
+any feature work began:
+1. **`vendor/` shadowed by bind mount** — `app` and `worker` mounted `.:/var/www/html`
+   with no exclusion for `vendor/`, which would hide the image's installed
+   dependencies behind the host's (dependency-less) checkout at container
+   start. Fixed by adding an anonymous `/var/www/html/vendor` volume to
+   both services, mirroring the pattern `frontend` already used for
+   `node_modules`. **Verified independently** by re-reading the committed
+   `docker-compose.yml` — this didn't require trusting an external claim.
+2. **`config/` directory did not exist at all.** Session 5 built the
+   `app/`, `bootstrap/`, `routes/`, `resources/`, and `tests/` directories
+   but never created `config/` — a genuinely bare gap, not a cosmetic one.
+   Hand-written (no PHP/artisan available in the AI sandbox that built
+   this) to match Laravel 11's standard config set: `app.php`,
+   `auth.php`, `cache.php`, `database.php`, `filesystems.php`,
+   `logging.php`, `mail.php`, `queue.php`, `services.php`, `session.php`.
+   `database.php`'s Redis client now explicitly defaults to `predis`
+   (matching the real `composer.json` dependency and the fact that the
+   Dockerfile installs no `redis` PECL extension), overridable via a new
+   `REDIS_CLIENT` env var.
+3. **`.env.example` had a blank `DB_PASSWORD`** while `docker-compose.yml`'s
+   `postgres` service sets a real password (`privacy_forge_dev_only`).
+   Fixed to match.
+
+**A fourth reported item — a claimed CVE requiring a Laravel 11→12/13 major
+version bump plus cascading Pest/Larastan bumps — was declined.** It could
+not be verified: no web search tool was available, and `packagist.org`
+(where the report suggested checking) is not in this sandbox's network
+allowlist — confirmed by testing directly rather than assuming. The
+described enforcement mechanism ("Composer refuses to install packages
+with disclosed advisories by default") also doesn't match how Composer
+actually works as far as could be recalled. Given "Laravel 11" is a
+decision recorded across this project's own governance documents (the
+Session 0 ledger, multiple ADRs), silently overriding it on an unverifiable
+claim would have been worse than leaving it alone and asking for a
+verifiable source. **This remains open — see Open questions and risks.**
+
+The syntax of all new config files was checked with a bracket-balance
+heuristic only (no PHP linter is available in this sandbox); this is a
+weak check, stated as such rather than claimed as full verification. Real
+verification happens on the next `docker compose up --build` against a
+machine with actual PHP/Composer/Docker.
+
 ## Session completed
 - Session number and title: **Session 5 — Development Environment, Repository Setup, Standards, and CI Baseline**
 - Objective: Make the project reproducible and continuously verified before any feature code exists.
@@ -49,9 +94,10 @@
 - Manual checks performed: read through the full CI workflow and Docker Compose file line-by-line checking service names, port mappings, and dependency ordering (`depends_on` with `condition: service_healthy`) against the container diagram in `03-architecture.md` — confirmed alignment. Cross-checked every ADR-referenced environment variable (export TTL, DSAR rate limit, chain anchor, connector retry settings, demo mode) actually appears in `.env.example` with an explanatory comment, not just a bare key.
 
 ## Open questions and risks
+- **Unresolved: a claimed CVE against Laravel 11 (CVE-2026-48019) requiring a major-version bump to 12.61.1+, plus cascading Pest 4.0 / Larastan 3.9 bumps, was reported but not applied.** Could not be verified (no web search available; `packagist.org` unreachable from this sandbox, confirmed by testing) and the described Composer enforcement mechanism didn't match this assistant's understanding of how Composer works. **This needs a human to verify with a real, checkable source (the actual Composer error output from a real `docker compose up --build`, or a link to the advisory) before any version bump happens.** If real, this is also a decision significant enough to warrant its own ADR (a major-version bump touching the frozen "Laravel 11" ledger allocation), not a silent `composer.json` edit — flag this explicitly at the start of whichever session resolves it.
 - **Known limitation, not yet resolved:** `composer.lock` and `package-lock.json` do not exist in this repository yet. They will be generated automatically the first time `docker compose up --build` runs on a machine with real internet access — but **that first successful build must be followed by committing the generated lock files**, or every subsequent build could silently resolve different dependency versions. This is flagged as the first thing to check when Session 6 starts, not something to assume already happened.
-- **Risk:** because tests, lint, and static analysis were validated only syntactically (YAML/JSON parse-checked) and not actually executed, there is a non-zero chance the CI pipeline has a real runtime bug (a wrong environment variable name, a missing PHP extension) that will only surface on the first real push. This should be treated as expected and low-drama — the first CI run after this commit is effectively this session's real integration test, and its output should be read carefully, not assumed green.
-- **No blockers to starting Session 6**, but Session 6 should begin by confirming CI is actually green on the pushed state before adding any feature code — starting feature work on top of a broken pipeline would make it hard to tell whether a subsequent failure is the new feature's fault or an unresolved Session 5 issue.
+- **Risk:** because tests, lint, and static analysis were validated only syntactically (YAML/JSON parse-checked, and for the new PHP config files, a weak bracket-balance heuristic only — no PHP linter is available in this sandbox) and not actually executed, there is a non-zero chance the CI pipeline or the new config files have a real runtime bug that will only surface on the first real push. This should be treated as expected and low-drama — the first real `docker compose up --build` and the first CI run are effectively this session's real integration test, and their output should be read carefully, not assumed green.
+- **No blockers to starting Session 6**, but Session 6 should begin by confirming `docker compose ps` shows `app` and `worker` with 0 restarts and `curl localhost:8000/up` returns 200 on the actual pushed state before adding any feature code.
 
 ## Next recommended session
 - Proposed session title: **Session 6a — Feature Slice: Consent Capture**

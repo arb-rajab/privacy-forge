@@ -6,6 +6,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Post-Session-5 correction: `vendor/` was being shadowed by the
+  `app`/`worker` bind mounts in `docker-compose.yml` (no exclusion,
+  unlike `frontend`'s handling of `node_modules`) — added an anonymous
+  `/var/www/html/vendor` volume to both.
+- Post-Session-5 correction: `config/` directory did not exist at all.
+  Added the standard Laravel 11 config set; `database.php`'s Redis
+  client now explicitly defaults to `predis` (matching the actual
+  `composer.json` dependency, since no `redis` PECL extension is
+  installed in the app image).
+- Post-Session-5 correction: `.env.example` had a blank `DB_PASSWORD`
+  while `docker-compose.yml`'s `postgres` service sets a real one —
+  fixed to match.
+
+### Declined
+- A reported CVE (CVE-2026-48019) requiring a Laravel 11→12/13 major
+  version bump, plus cascading Pest/Larastan bumps, was **not** applied.
+  Could not be verified — no web search tool available, and
+  `packagist.org` is unreachable from the sandbox that built this
+  (confirmed by testing, not assumed). Needs human verification with a
+  checkable source before any version bump. See
+  `docs/project-memory/12-session-handoff.md`.
+
 ### Added
 - Session 5: Laravel 11 + Vue 3/Inertia application skeleton (no product
   features yet) — `artisan`, `bootstrap/app.php` wired to Laravel's built-in
