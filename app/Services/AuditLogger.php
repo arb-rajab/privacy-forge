@@ -31,8 +31,9 @@ class AuditLogger
         string $resourceId,
         string $decision = 'allow',
         ?string $policyId = null,
+        ?string $reasonCode = null,
     ): AuditLogEntry {
-        return DB::transaction(function () use ($actorType, $actor, $action, $resourceType, $resourceId, $decision, $policyId) {
+        return DB::transaction(function () use ($actorType, $actor, $action, $resourceType, $resourceId, $decision, $policyId, $reasonCode) {
             $previous = AuditLogEntry::query()->orderByDesc('sequence')->lockForUpdate()->first();
             $prevHash = $previous === null ? self::genesisHash() : $previous->entry_hash;
 
@@ -44,6 +45,7 @@ class AuditLogger
                 'resource_id' => $resourceId,
                 'policy_id' => $policyId,
                 'decision' => $decision,
+                'reason_code' => $reasonCode,
             ];
 
             $entryHash = self::computeHash($prevHash, $payload);
@@ -83,6 +85,7 @@ class AuditLogger
                 'resource_id' => $entry->resource_id,
                 'policy_id' => $entry->policy_id,
                 'decision' => $entry->decision,
+                'reason_code' => $entry->reason_code,
             ];
 
             if (self::computeHash($entry->prev_hash, $payload) !== $entry->entry_hash) {

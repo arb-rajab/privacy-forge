@@ -62,6 +62,13 @@ Purpose and notice *creation* endpoints (`POST /admin/consent-purposes`,
 the plan described here. Retention-policy creation remains undesigned
 until the retention slice is implemented.
 
+`POST /dsar`, `GET /dsar/status/{signedToken}`, and `POST
+/admin/dsar/{dsarId}/verify-identity` were already present in the Session 3
+draft spec and are implemented as specified at Session 6b — no contract
+changes were needed for these three. `POST /admin/dsar/{dsarId}/approve-erasure`
+remains specified but unimplemented (erasure approval doesn't exist yet;
+see `12-session-handoff.md`).
+
 ## Error model
 
 **RFC 9457 Problem Details** (`application/json`, `type`/`title`/`status`/

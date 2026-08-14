@@ -71,7 +71,9 @@ erDiagram
 
     DSAR_REQUEST {
         uuid id PK
-        string subject_identifier
+        string subject_identifier "encrypted at rest (reversible — see below)"
+        string subject_identifier_hash "HMAC, rate-limit lookup only (NFR-006)"
+        string status_token "opaque, unguessable; public status link key (T-05)"
         enum request_type "access | export | erasure"
         enum status "pending_verification | in_progress | partially_complete | complete | rejected"
         uuid identity_verified_by FK
@@ -149,6 +151,7 @@ erDiagram
         uuid resource_id
         uuid policy_id FK
         enum decision "allow | deny"
+        string reason_code "nullable; set on denials (ADR-0006), added at Session 6b"
         string prev_hash
         string entry_hash
         timestamp created_at
@@ -180,13 +183,13 @@ erDiagram
 | `CONSENT_NOTICE` | Immutable, versioned wording shown to a data subject | version, body, published_at | Organisational metadata (the wording itself is not personal data; a specific consent record referencing it is) |
 | `CONSENT_RECORD` | Evidence that a specific subject consented (or withdrew) to a specific notice version | subject_identifier_hash, status | Personal data |
 | `CONNECTOR` | A registered external system that can fulfil export/erasure tasks | webhook_url, secret_hash | Organisational/infrastructure metadata |
-| `DSAR_REQUEST` | A data-subject request and its lifecycle state | request_type, status, verification/approval actors | Personal data, elevated sensitivity |
+| `DSAR_REQUEST` | A data-subject request and its lifecycle state | request_type, status, verification/approval actors | Personal data, elevated sensitivity. `subject_identifier` implemented at Session 6b as an application-layer encrypted column (Laravel's `encrypted` cast, reversible — staff must be able to read the identity claim for the manual-verification stub, unlike `CONSENT_RECORD`'s one-way hash), with a separate `subject_identifier_hash` column used only for the NFR-006 rate-limit lookup. |
 | `DSAR_CONNECTOR_TASK` | One connector's independently tracked piece of a DSAR | status, attempt_count, failure_reason | Operational metadata (may reference personal data indirectly via the parent request) |
 | `EXPORT_BUNDLE` | The assembled export artifact for a data subject | storage_path, format, signed_url_expires_at | Personal data, high sensitivity |
 | `DELETION_CERTIFICATE` | Evidence of what was (or wasn't) erased | summary, exceptions | Evidentiary record |
 | `RETENTION_POLICY` | Defines how long a data category is kept and what happens at expiry | retention_period_days, post_expiry_action | Organisational metadata |
 | `RETENTION_EXECUTION` | A single dry-run or real run of a policy | mode, affected_record_count | Evidentiary record |
-| `POLICY_DEFINITION` | An ABAC policy row (ADR-0001) | action_name, conditions (JSON), effect | Organisational/security metadata |
+| `POLICY_DEFINITION` | An ABAC policy row (ADR-0001) | action_name, conditions (JSON), effect | Organisational/security metadata. Implemented at Session 6b, evaluated by `App\Services\PolicyEvaluator`. Only `dsar.identity.verify` is registered so far (one row per active policy, `subject_conditions`/`resource_conditions`/`environment_conditions` each a JSON object of `attribute => {in: [...]}` or `{equals: ...}`); the remaining sensitive actions ADR-0001 names (export/erasure approval, retention execution, audit log access) are not yet registered since their endpoints don't exist yet. No seeding/bootstrap mechanism exists yet for the initial row — see `12-session-handoff.md`. |
 | `AUDIT_LOG_ENTRY` | Hash-chained, tamper-evident record of every sensitive action (ADR-0003) | policy_id, decision, prev_hash, entry_hash | Evidentiary record; may reference personal data indirectly. `actor_type: data_subject` added at Session 6a for unauthenticated public consent actions (capture/withdraw) — the original three values had no category for an actor who is neither staff, a connector, nor the system itself. |
 
 **Demo seed data note:** every entity above, when populated in the public
@@ -201,7 +204,7 @@ enforced at the seeding/import layer, detailed in Session 8.
 | A `CONSENT_NOTICE` is never edited after publication; new wording is a new version | Application layer (no update endpoint exists) + DB grant restricting `UPDATE` on `consent_notices.body`/`published_at` |
 | Withdrawing consent never deletes the `CONSENT_RECORD` row | Application layer: withdrawal is an `UPDATE` to `status`/`withdrawn_at` only, never a `DELETE`; DB grant revokes `DELETE` on this table entirely |
 | `RETENTION_EXECUTION` dry-run and real-run share identical selection logic | `RetentionSelector` service, single code path (ADR-0002) — not a database constraint, but the parity test in Session 7 verifies it directly |
-| A DSAR cannot reach `in_progress` without `identity_verified_by`/`identity_verified_at` set | DB check constraint + application-level guard (FR-007) |
+| A DSAR cannot reach `in_progress` without `identity_verified_by`/`identity_verified_at` set | DB check constraint (`dsar_requests_verified_before_in_progress`, implemented Session 6b, confirmed via a direct-DB-write test that it rejects the update independent of the application layer) + application-level guard (`Admin\DsarController::verifyIdentity`) (FR-007) |
 | A DSAR's `erasure_approved_by` must differ from `identity_verified_by` | Enforced in the `dsar.erasure.approve` policy definition (ADR-0001), not a raw DB constraint — because it's a *policy*, changeable via policy versioning, not a schema migration |
 | `AUDIT_LOG_ENTRY` rows are never updated or deleted | DB grants revoke `UPDATE`/`DELETE` for the application role entirely (ADR-0003); every entry additionally carries `prev_hash`/`entry_hash` |
 | Exactly one `ORGANISATION_SETTINGS` row exists | DB-level unique constraint on a constant key column (ADR-0005) |
@@ -222,10 +225,13 @@ enforced at the seeding/import layer, detailed in Session 8.
 - `audit_log_entries(created_at)` alone, additionally, to support chain
   verification walking entries in insertion order efficiently.
 
-No index is placed on `subject_identifier` in `dsar_requests` in plaintext;
-it is treated the same as `consent_records.subject_identifier_hash` for
-lookup purposes once hashing is finalised in implementation (Session 6) —
-noted here so indexing and encryption decisions aren't made independently
+No index is placed on `subject_identifier` in `dsar_requests` in plaintext —
+implemented at Session 6b as planned: a dedicated `subject_identifier_hash`
+column (indexed, `DsarRequest::hashIdentifier()`) is used for the NFR-006
+rate-limit lookup, exactly mirroring `consent_records.subject_identifier_hash`.
+The plaintext `subject_identifier` column itself is encrypted at the
+application layer and is never indexed or queried directly — noted here so
+indexing and encryption decisions aren't made independently
 of each other later.
 
 ## Migration approach and rollback

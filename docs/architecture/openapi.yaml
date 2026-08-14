@@ -494,6 +494,13 @@ components:
         resource_id: { type: string, format: uuid }
         policy_id: { type: string, format: uuid, nullable: true }
         decision: { type: string, enum: [allow, deny] }
+        reason_code:
+          type: string
+          nullable: true
+          description: >
+            Set on denials — either fail-closed (policy_missing,
+            evaluation_error; ADR-0006) or an ordinary, correctly-evaluated
+            denial (policy_conditions_not_met), distinguishing the two.
         entry_hash: { type: string }
         created_at: { type: string, format: date-time }
 

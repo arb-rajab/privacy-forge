@@ -7,144 +7,118 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 6a — Real Environment Verification + Feature Slice: Consent Capture**
-- Objective: (1) actually boot the Session 5 environment for the first time and fix whatever a real `docker compose up --build` surfaces; (2) resolve the open CVE-2026-48019 question with a real source; (3) implement the consent-capture vertical slice (purposes, versioned notices, capture, withdrawal) end to end against the validated OpenAPI contract.
-- Status: **complete and pushed** — all three objectives done, 16/16 feature tests passing for real against a live Postgres instance, `composer lint` / `composer analyse` (Larastan level 8) / `npm run lint` / `npm run build` all green. Commits `d0785f2`, `30dffc1`, and a follow-up `67d7b1b` (risk register entry, see below) are all on `origin/main`.
+- Session number and title: **Session 6b — DSAR Intake and Identity Verification**
+- Objective: implement US-005 (DSAR submission, rate-limited, signed status link) and US-006 (identity verification) end to end, and stand up the first real invocation of the ADR-0001 `PolicyEvaluator` — including a genuine fault-injection test of ADR-0006's fail-closed guarantee.
+- Status: **complete and pushed to `origin/main`** — 34/34 feature tests passing for real against a live Postgres instance (18 new this session), `composer lint` (Pint) and `composer analyse` (Larastan level 8) both clean, `docs/architecture/openapi.yaml` re-validated with the actual `openapi-spec-validator` tool. Pushed as two commits: the feature slice itself, and a small follow-up tracking the `R-02` policy-seeding gap in the risk register (mirroring how Session 6a split its risk-register entry from its feature commit).
 
-## Part 1 — Real environment verification (this had never actually been booted)
+## What was built
 
-Session 5's environment was validated only by YAML/JSON syntax-checking — no PHP/Docker/network access existed in that sandbox. This session had real Docker access and ran `docker compose up --build` for the first time. Result: **it built and booted**, but several real bugs surfaced that syntax-checking could never have caught:
+### US-005 — DSAR submission and status check
+- `POST /api/v1/dsar` (`App\Http\Controllers\DsarController::submit`) — accepts `request_type` (access/export/erasure) and `subject_identifier`, creates a `DsarRequest` row in `pending_verification`, and returns a signed, time-limited status URL (`DsarStatusToken` schema: `status_url`, `status`).
+- **Rate limiting (NFR-006):** keyed on `DsarRequest::hashIdentifier()` (HMAC over `subject_identifier`, same approach as `ConsentRecord::hashIdentifier()`), via Laravel's `RateLimiter` facade (backed by the `cache` store — Redis in dev/prod, array in tests, matching `05-api-contracts.md`'s existing description). Configurable via `config('dsar.submission_rate_limit_per_day')` / `DSAR_SUBMISSION_RATE_LIMIT_PER_DAY` (default 3). A breach returns `429` with a `ProblemDetail` body — not a silent drop, not a silent allow. Tested for both "3 succeed, 4th blocked" and "the limit is per-identifier, not global."
+- **Status link design (T-05, `06-security-threat-model.md`):** the returned link is keyed by an opaque `status_token` column (`Str::random(64)`), never the DSAR's own uuid `id`, and is additionally signed and time-limited via Laravel's `URL::temporarySignedRoute()` against the named route `dsar.status`. `GET /api/v1/dsar/status/{signedToken}` (`DsarController::status`) checks `$request->hasValidSignature()` explicitly (not the built-in `signed` middleware, which would return `403` on both "expired" and "tampered" — the OpenAPI contract only documents `410`, and collapsing both cases into one response avoids giving an attacker an oracle for "this token once existed" vs. "this token is simply invalid"). Tested: valid link → 200; expired link → 410; a bare token with no signature at all → 410; a forged-but-validly-signed URL built around the DSAR's *actual uuid id* (not its status_token) → 404, confirming the id itself was never a usable lookup key even in principle.
+- **NFR-007 (≤72h TTL, explicitly assigned to this session):** `config('dsar.status_link_ttl_hours')` clamps to a maximum of 72 regardless of env misconfiguration (`min((int) env(...), 72)`), mirroring the existing `EXPORT_BUNDLE` pattern of enforcing the cap in code, not just documentation. Tested directly against the returned `status_url`'s `expires` query parameter.
 
-1. **`composer.lock` / `package-lock.json` never actually reached the host.** These files are generated during the Docker image build (`composer install` / `npm install` inside `docker/Dockerfile*`), but `docker-compose.yml` bind-mounts the repo over the container's working directory at container *start* — the same shadowing issue Session 5 already fixed for `vendor/`, except that fix only added an anonymous volume for `vendor/` and `node_modules/`, not for these two individual files. Fixed by running `composer install` / `npm install` again directly against the live bind mount (`docker compose exec app composer install`, `docker compose exec frontend npm install`), which writes the lock files straight to the host. **Both are now committed** — the Session 5 documented gap is closed.
-2. **`phpunit.xml.dist` did not exist at all.** `php artisan test` failed outright with no tests able to run. Added, deliberately *not* forcing `DB_CONNECTION=sqlite` (the app image installs `pdo_pgsql` only, no `pdo_sqlite`) — tests run against the real Postgres connection via `.env`, using `RefreshDatabase` (transaction-wrapped, rolled back per test) rather than assuming an ephemeral database.
-3. **`.eslintrc.cjs` did not exist.** `npm run lint` failed outright ("ESLint couldn't find a configuration file"). Added (ESLint 8 classic config, `plugin:vue/vue3-recommended`), with `vue/multi-word-component-names` disabled to match Inertia's `Pages/` naming convention (Laravel's own Breeze starter kit does the same).
-4. **Larastan (level 8) caught a real gap**: `HandleInertiaRequests::share()`'s return type had no iterable value type. Fixed with a PHPDoc annotation.
-5. **Pint caught 7 real style violations** across 7 files (an actually-unused import in `config/logging.php`, import ordering, operator spacing). Auto-fixed.
-6. **CI bug: `dependency-scan` referenced a nonexistent action tag.** `google/osv-scanner-action/osv-scanner-action@v1` doesn't exist (only `v2.x` releases exist) — this would have failed on first push. Pinned to `@v2.5.0`.
-7. **CI bug: the `php-quality` job's Postgres service and the app's `.env` disagreed on the database name.** The CI Postgres service creates `privacy_forge_test`, but neither the migrate nor test step overrode `DB_DATABASE` away from `.env.example`'s `privacy_forge` — migrations would have failed to connect to a database that doesn't exist. Added the missing override to both steps.
+### US-006 — Identity verification (first real PolicyEvaluator invocation)
+- `POST /api/v1/admin/dsar/{dsarId}/verify-identity` (`App\Http\Controllers\Admin\DsarController::verifyIdentity`), staff-only (session + `web`/`auth` middleware, same pattern as the Session 6a admin routes).
+- **`App\Services\PolicyEvaluator`** — the ADR-0001 engine, built for real this session (not a stub): given an `action` name, the acting `User`, and a resource, it fetches the single active `PolicyDefinition` row for that action (`policy_definitions` table, versioned rows, `status: active|superseded`), evaluates `subject_conditions`/`resource_conditions`/`environment_conditions` (each a JSON map of `attribute => {in: [...]}` or `{equals: ...}`), and returns a `PolicyDecision` (`allowed`, `policyId`, `reasonCode`). Every call — allow, ordinary deny, or fail-closed deny — is audit-logged via `AuditLogger::record()` with the deciding `policy_id` (FR-013/FR-014). Only `dsar.identity.verify` is registered; the other sensitive actions ADR-0001 names (export/erasure approval, retention execution, audit log access) are not registered because their endpoints don't exist yet — this is not an oversight, just not yet needed.
+- **Fail-closed, genuinely tested (ADR-0006):** `evaluate()` wraps its logic in `try/catch(Throwable)`. Two real fault-injection tests exist in `tests/Feature/DsarIdentityVerificationTest.php`:
+  - **Missing policy** — no active `dsar.identity.verify` row (either none created, or the only row set to `status: superseded`) — denies even an Owner, logs `reason_code: policy_missing`.
+  - **Malformed condition** — a `PolicyDefinition` factory-created with `subject_conditions: ['role' => 'not-a-valid-condition-object']` (a condition spec that isn't itself an array) — the evaluator's `matchesConditions()` throws `UnexpectedValueException`, caught by `evaluate()`, denies with `reason_code: evaluation_error`.
 
-All of the above are committed in `d0785f2`. Verified for real, not assumed:
-- `docker compose ps` → all 6 services healthy, `app`/`worker` at **0 restarts**.
-- `curl localhost:8000/up` → **200**.
-- `docker compose exec app php artisan test` → passes.
-- `composer lint`, `composer analyse`, `npm run lint`, `npm run build` → all pass.
-- `docs/architecture/openapi.yaml` validated with the actual `openapi-spec-validator` tool CI uses (via a throwaway `python:3.12-slim` container), not just YAML-parsed.
+  Both tests additionally assert the DSAR's `status` is still `pending_verification` afterward — the deny genuinely blocks the state transition, not just the HTTP response. Ordinary (non-fault) denial (Support Staff, correct policy present) is logged separately with `reason_code: policy_conditions_not_met`, so an operator reading the audit log can always tell "denied by design" apart from "the evaluator itself is broken," per ADR-0006's own requirement.
+- **Schema change required for this:** `audit_log_entries` had no column to carry ADR-0006's "distinguishing reason code" at all (Session 6a never needed one — nothing had failed closed yet). Added `reason_code` (nullable string) via a new migration, threaded through `AuditLogger::record()`/`verifyChain()` consistently (both include it in the hash payload now) and the `AuditLogEntry` model's `$fillable`. `docs/architecture/openapi.yaml`'s `AuditLogEntry` schema and `04-data-model.md`'s entity table updated to match, even though no endpoint returns this schema yet (`/admin/audit-log` is still unimplemented, Session 7 scope) — kept for documentation consistency with the model.
+- **DB-level invariant, not just application-level:** `dsar_requests` carries a Postgres `CHECK` constraint (`dsar_requests_verified_before_in_progress`) enforcing "no row reaches `in_progress` without `identity_verified_by`/`identity_verified_at` set" independent of the application code — tested directly by attempting a raw `DB::table()->update()` that skips the app entirely and confirming it's rejected with a `QueryException`.
 
-## Part 2 — CVE-2026-48019, resolved with a real source
+### Data model additions
+- `dsar_requests` — `subject_identifier` is an **application-layer encrypted column** (Laravel's `encrypted` cast, keyed on `APP_KEY`), not a one-way hash like `ConsentRecord`: staff genuinely need to read the identity claim to perform the manual-verification stub (FR-020), so it must be reversible. A separate `subject_identifier_hash` (HMAC, same construction as `ConsentRecord::hashIdentifier()`) exists purely for the NFR-006 rate-limit lookup and is never used to reconstruct the original value. This finalises the "hashing decision deferred to Session 6" note that has been sitting in `04-data-model.md`'s indexing strategy section since Session 3.
+- `dsar_requests.erasure_approved_by`/`erasure_approved_at` columns exist (matching the authoritative `DSAR_REQUEST` entity in `04-data-model.md`) but are **not populated by any endpoint this session** — see the explicit deferral below.
+- `policy_definitions` — implements `POLICY_DEFINITION` from `04-data-model.md` for the first time.
 
-**The previously-open claim is false as applied to this repository. No action taken on `composer.json`.**
+## What was explicitly NOT done this session, and why
 
-Checked against the primary source — the actual GitHub Security Advisory, `GHSA-5vg9-5847-vvmq` (`laravel/framework`, CRLF injection in the default email validation rule):
-- **Affected:** Laravel `< 12.60.0` and `<= 13.9.0`.
-- **Patched:** `>= 12.60.0` and `>= 13.10.0`.
-- **Laravel 11.x is not mentioned in either range.** The advisory simply doesn't apply to this repository's frozen "Laravel 11" ledger allocation.
+**1. Separation-of-duties (US-006's `verifier != approver` acceptance criterion) is only half-testable, and was not faked.**
+Erasure approval (`POST /admin/dsar/{dsarId}/approve-erasure`) does not exist yet — it remains specified in `docs/architecture/openapi.yaml` but unimplemented. ADR-0001's separation-of-duties design (a condition on the `dsar.erasure.approve` policy requiring `actor.id != dsar.identity_verified_by_user_id`) genuinely cannot be tested until that endpoint exists, because there is no second action to attempt separation-of-duties *against*. This is a deliberate scope decision, not an oversight: no test exists claiming to cover this acceptance criterion, and none should be written until erasure approval is built. `PolicyEvaluator`'s condition matcher currently only implements `in`/`equals` — it does **not** yet implement a "compare this subject attribute against a resource attribute" operator (e.g. `identity_verified_by`), because building that operator now, with nothing to exercise it, would be exactly the kind of speculative, untested code this project's own governance argues against. Whichever session adds erasure approval will need to extend the condition matcher for this, not just add a policy row.
 
-The previous report's claim — "affects all Laravel 11.x, patched only in 12.61.1+/13.10+, requiring a bump to `laravel/framework ^12.61.1`, `pestphp/pest ^4.0`, `pestphp/pest-plugin-laravel ^4.0`, `larastan/larastan ^3.9`" — was **wrong about the affected range** (11.x was never in it) and, separately, Session 5's scepticism about the claimed Composer enforcement mechanism ("Composer 2.10+ refuses to install packages with disclosed advisories by default") was also justified — no such behavior exists; that isn't how Composer works, real or v2.10 (confirmed: this session's own `docker compose exec app composer --version` reports 2.10.2, and it installed the current `composer.lock` without any advisory-based refusal).
+**2. US-006 AC2 ("when any export or erasure task is attempted [before verification], the system refuses and logs the refusal") is also not testable yet.**
+This depends on DSAR task execution (US-007 — dispatching to connectors), which is entirely unbuilt. There is no endpoint or code path to "attempt" an export/erasure task against, so there's nothing to assert a refusal against. Flagging this explicitly alongside the separation-of-duties gap above, since both stem from the same root cause: US-006 has acceptance criteria that reach forward into US-007/erasure-approval scope that this session deliberately did not build.
 
-**No ADR needed.** The Session 5 decision to decline the bump without a verifiable source was the right call, not merely a defensible one — verifying it took a real GitHub advisory fetch, which wasn't available in that sandbox. This can be considered closed; no residual risk tracked forward.
+**3. No production seeding/bootstrap mechanism for `PolicyDefinition` rows.**
+This repository has no `database/seeders/` directory at all (checked — none exists, not even the Laravel default `DatabaseSeeder`). Introducing one now, for exactly one policy row, felt like scope creep beyond what was asked — tests create the `dsar.identity.verify` policy row directly via `PolicyDefinitionFactory`, matching how every other test in this codebase sets up its own fixtures. **Practical consequence for a real deployment:** as shipped, a fresh instance has *no* active `dsar.identity.verify` policy at all, which means identity verification is fail-closed-denied for everyone, including the Owner, until someone inserts the row by hand (there is no `policy.update` admin action yet either — ADR-0006 names it as a future sensitive action, not yet built). This is an honest, real gap, not a hidden one — **tracked durably as `R-02` in `docs/project-memory/10-risk-register.md`** (low severity: it fails safe, not open — ADR-0006's fail-closed default means this is an availability/usability gap, not a security exposure — but real on every fresh install). Whichever session builds `policy.update` (Owner-only, per ADR-0006) or a seeding story should treat "how does the first policy row get created on a fresh instance" as a first-class question, not an afterthought.
 
-## Part 3 — Session 6a feature slice: consent capture
+**4. The exhaustive (role × sensitive-action) authorisation matrix was not built.** Per the session's own scope: only `dsar.identity.verify` needed to be proven to work, including its fail-closed path. That's what exists. NFR-005's full matrix remains Session 7 scope, unchanged.
 
-Implements US-001 through US-004 (`02-requirements.md`) end to end, against `docs/architecture/openapi.yaml`, with ADR-0003's hash-chain audit logging wired in from the start.
-
-### A contract gap was found and filled, not designed around
-
-`docs/architecture/openapi.yaml` had a `POST /consent`, a `POST /consent/{id}/withdraw`, and a `GET .../notice` — but **no endpoint at all** for a Privacy Manager to actually create a purpose or publish a notice, even though the "Admin — Purposes and Policies" tag's own description says "Staff-only consent purpose, notice, and retention policy management." `05-api-contracts.md` had already flagged this explicitly: *"Endpoints for purpose/notice/retention-policy creation ... are deliberately not fully enumerated in the v1 OpenAPI draft — they are conventional CRUD and will be added mechanically once the admin SPA's exact field needs are known during implementation (Session 6)."* This session did exactly that — added three endpoints, matching the existing spec's conventions exactly (same `staffAuth` security scheme, same `ProblemDetail` error shape):
-- `POST /admin/consent-purposes` (US-001)
-- `DELETE /admin/consent-purposes/{purposeId}` (US-001 AC2 — refuses if active consent records exist)
-- `POST /admin/consent-purposes/{purposeId}/notices` (US-002)
-
-This is additive, not a redesign, and doesn't touch any existing path or schema. `05-api-contracts.md` updated to reflect these as now implemented (retention-policy creation remains undesigned, correctly, since the retention slice doesn't exist yet).
-
-### What was built
-- **Migrations** (`database/migrations/2026_08_14_0000{01..06}_*.php`): `users` (STAFF_USER — `config/auth.php` already expected `App\Models\User`, fulfilled for the first time), `consent_purposes`, `consent_notices`, `consent_records`, `audit_log_entries`. All migrated up, rolled back, and re-migrated for real against the dev Postgres instance (the parity check `04-data-model.md` calls for).
-- **Models**: `User`, `ConsentPurpose`, `ConsentNotice`, `ConsentRecord`, `AuditLogEntry` — all UUID-keyed (`HasUuids`). `ConsentNotice`/`ConsentRecord`/`AuditLogEntry` override `save()`/`delete()` to throw `LogicException` against any mutation path that isn't the one legitimate one (new-row insert for notices/audit entries; withdrawal-only update for consent records) — enforcing the `04-data-model.md` invariants at the application layer.
-- **`App\Services\AuditLogger`** — the hash-chain half of ADR-0003. `record()` computes `entry_hash = sha256(prev_hash + canonical_json(payload))` inside a transaction with `lockForUpdate()` on the last row (by a dedicated auto-incrementing `sequence` column, not `created_at`, since Postgres timestamps aren't guaranteed distinct at sub-millisecond write speed). `verifyChain()` replays the whole chain and returns the first `sequence` at which it breaks — proven by a real test that tampers a row via a raw `DB::table()->update()` (bypassing the model entirely) and confirms `verifyChain()` both detects it and identifies the exact broken entry.
-- **Controllers/Resources/FormRequests** for all 6 endpoints (3 public consent endpoints, 3 admin purpose/notice endpoints), response shapes matching the OpenAPI schemas field-for-field (see the `JsonResource::withoutWrapping()` note below).
-- **RFC 9457 Problem Details** wired into `bootstrap/app.php`'s exception renderer, scoped to `api/*` requests only, so validation/auth/not-found errors on the API surface match `components.schemas.ProblemDetail` instead of Laravel's default shapes.
-- **Authorisation**: purpose/notice creation and deletion are **not** one of ADR-0001's enumerated ABAC "sensitive actions" (DSAR verification/erasure approval, retention execution, audit log access) — gated instead by a plain role check (`User::isPrivilegedFor('privacy_manager')`) per the roles matrix in `02-requirements.md`. Full ABAC `PolicyEvaluator` infrastructure remains Session 7 scope, as `02-requirements.md` itself already states ("Session 7" against NFR-005/US-015). This is a deliberate scope boundary, not an oversight — flagging it explicitly so it isn't mistaken for ABAC being skipped where it should apply.
-
-### A real bug caught along the way (not by a human — by actually running the tests)
-Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by default. The OpenAPI schemas specify fields at the top level with no such wrapper. First test run failed on exactly this mismatch. Fixed with `JsonResource::withoutWrapping()` in `AppServiceProvider::boot()` — a global fix, not a per-resource one, so it can't be silently forgotten on the next resource class.
-
-### Known, explicitly-flagged gap: DB-level grant revocation not implemented
-
-`04-data-model.md`'s invariants table and ADR-0003 both call for revoking `UPDATE`/`DELETE` grants at the database level on `audit_log_entries` (and, per the data model, `consent_notices`). **This is not implemented, and implementing it naively would not have worked anyway**: in the current `docker-compose`/CI setup, migrations run as the same Postgres role (`privacy_forge`) the application connects as at runtime. In PostgreSQL, a table's **owner** retains full implicit privileges regardless of `REVOKE` — a bare `REVOKE UPDATE, DELETE ON audit_log_entries FROM privacy_forge` would silently no-op against the very role that owns the table. Doing this for real requires a second, less-privileged runtime role distinct from the migration/owning role — an infrastructure change (docker-compose, `.env`, CI service config) big enough to deserve its own explicit decision, not something to bury inside a feature-slice migration.
-
-**What *is* implemented and real:** application-layer immutability (model-level `save()`/`delete()` overrides, no update/delete route exists) plus the actual hash-chain tamper-*detection* mechanism (ADR-0003 Option B) — which is what makes tampering detectable regardless of whether it's also DB-preventable, and is independently tested (see `ConsentCaptureTest`'s chain-tampering test).
-
-**Recommendation for whichever session picks this up** (likely Session 8, deployment/operations, given periodic anchoring is already scoped there): introduce a second Postgres role — an `owner`/migration role distinct from the app's runtime connection role — then the `REVOKE` becomes real. Until then, this should not be silently assumed to already provide DB-level protection.
-
-**Tracked durably as `R-01` in `docs/project-memory/10-risk-register.md`** — this handoff section explains the gap, but the register (not this file, which gets overwritten every session) is what's supposed to persist and get reviewed before Session 8.
+**5. R-01 (audit-log DB-grant gap, `10-risk-register.md`) was not touched.** Per the ground rules for this session — it's still Session 8 scope, and nothing this session did made it trivial to fix (it still requires a second, non-owning Postgres role).
 
 ## Files created or changed
 
-**Environment/CI fixes:** `phpunit.xml.dist`, `.eslintrc.cjs`, `composer.lock`, `package-lock.json`, `tests/Unit/.gitkeep`, `app/Http/Middleware/HandleInertiaRequests.php`, `resources/js/Pages/Welcome.vue`, `.github/workflows/ci.yml`, plus Pint auto-fixes across 7 files (see commit `d0785f2`).
+**Migrations:** `database/migrations/2026_08_14_0000{07,08,09}_*.php` — `dsar_requests` (with the Postgres `CHECK` constraint), `policy_definitions`, `audit_log_entries.reason_code`. All migrated up, rolled back, and re-migrated for real against the dev Postgres instance.
 
-**Feature slice:**
-- `docs/architecture/openapi.yaml` — added `POST /admin/consent-purposes`, `DELETE /admin/consent-purposes/{purposeId}`, `POST /admin/consent-purposes/{purposeId}/notices`, and their schemas.
-- `docs/project-memory/04-data-model.md` — added `data_subject` to `AUDIT_LOG_ENTRY.actor_type` (the original 3 values had no category for an unauthenticated public consent action).
-- `docs/project-memory/05-api-contracts.md` — updated the stale "not yet enumerated" note now that these endpoints exist.
-- `database/migrations/2026_08_14_0000{01..06}_*.php`, `database/factories/{User,ConsentPurpose,ConsentNotice,ConsentRecord}Factory.php`.
-- `app/Models/{User,ConsentPurpose,ConsentNotice,ConsentRecord,AuditLogEntry}.php`.
-- `app/Services/AuditLogger.php`.
-- `app/Http/Controllers/Controller.php` (base class — didn't exist yet), `app/Http/Controllers/ConsentController.php`, `app/Http/Controllers/Admin/{ConsentPurposeController,ConsentNoticeController}.php`.
-- `app/Http/Requests/{CaptureConsentRequest,StoreConsentPurposeRequest,PublishConsentNoticeRequest}.php`.
-- `app/Http/Resources/{ConsentPurposeResource,ConsentNoticeResource,ConsentRecordResource}.php`.
-- `app/Providers/AppServiceProvider.php` — `JsonResource::withoutWrapping()`.
-- `bootstrap/app.php` — RFC 9457 Problem Details exception rendering for `api/*`.
-- `routes/api.php` — all 6 endpoints, admin routes under `Route::middleware(['web', 'auth'])` (no Sanctum dependency added; this is the built-in-only way to get session-cookie auth on `api.php`-registered routes).
-- `tests/Feature/{ConsentPurposeTest,ConsentNoticeTest,ConsentCaptureTest,ConsentWithdrawalTest}.php` — 16 tests total, all passing against a live Postgres instance.
-- `tests/Pest.php` — added `RefreshDatabase` globally for `Feature` tests.
-- `docs/project-memory/10-risk-register.md` — added `R-01` for the ADR-0003 DB-grant gap (see Part 3), committed and pushed separately (`67d7b1b`) as its own small commit rather than folded into the feature-slice commit.
+**Config:** `config/dsar.php` (new); `.env.example` — added `DSAR_STATUS_LINK_TTL_HOURS`.
+
+**Models:** `app/Models/DsarRequest.php`, `app/Models/PolicyDefinition.php` (new); `app/Models/AuditLogEntry.php` (added `reason_code` to `$fillable`).
+
+**Services:** `app/Services/PolicyEvaluator.php`, `app/Services/PolicyDecision.php` (new); `app/Services/AuditLogger.php` (added `$reasonCode` param to `record()`, included in both the hash payload and `verifyChain()`'s recomputation).
+
+**Factories:** `database/factories/DsarRequestFactory.php`, `database/factories/PolicyDefinitionFactory.php`.
+
+**Controllers/Requests/Resources:** `app/Http/Controllers/DsarController.php` (public submit/status), `app/Http/Controllers/Admin/DsarController.php` (verify-identity), `app/Http/Requests/SubmitDsarRequest.php`, `app/Http/Resources/DsarStatusResource.php`.
+
+**Routes:** `routes/api.php` — `POST /dsar`, `GET /dsar/status/{signedToken}` (named `dsar.status`, needed for `URL::temporarySignedRoute`), `POST /admin/dsar/{dsarId}/verify-identity`.
+
+**Tests:** `tests/Feature/DsarSubmissionTest.php` (6 tests), `tests/Feature/DsarStatusTest.php` (4 tests), `tests/Feature/DsarIdentityVerificationTest.php` (8 tests) — 18 new tests, all passing against live Postgres.
+
+**Docs:** `docs/architecture/openapi.yaml` (`AuditLogEntry.reason_code`), `docs/project-memory/04-data-model.md` (DSAR_REQUEST ERD fields, AUDIT_LOG_ENTRY reason_code, POLICY_DEFINITION implementation note, invariants table, indexing strategy note now resolved), `docs/project-memory/05-api-contracts.md` (DSAR endpoints now implemented, `approve-erasure` still not).
 
 ## Decisions made
-- **No ADR for the CVE question** — resolved as not applicable, not as a version bump. See Part 2.
-- **Purpose/notice creation is role-gated, not ABAC-gated.** Consistent with ADR-0001's own enumerated sensitive-action list, which does not include these actions. Not a new decision so much as applying an existing one correctly — flagged here so it isn't mistaken for a gap in Session 7's ABAC work later.
-- **DB-level grant revocation deferred, with a concrete reason and a concrete recommendation** (a second DB role), not silently skipped. See Part 3's flagged gap above.
+- **`subject_identifier` on `DsarRequest` is reversibly encrypted (Laravel `encrypted` cast), not one-way hashed** — a deliberate divergence from `ConsentRecord`'s pattern, because staff must be able to read the identity claim to perform manual verification. A separate HMAC hash column exists solely for rate-limit lookups.
+- **The public status endpoint validates signatures manually (`hasValidSignature()`) rather than using Laravel's `signed` middleware** — so both "expired" and "tampered" collapse to the single documented `410` response, matching the OpenAPI contract exactly and avoiding an oracle for token validity.
+- **`reason_code` added to `audit_log_entries`** — a schema gap discovered by actually trying to implement ADR-0006's "distinguishing reason code" requirement for real; not present because nothing had needed it before this session.
+- **Separation-of-duties and US-006 AC2 explicitly deferred, not faked** — see the numbered section above.
+- **No seeder infrastructure introduced** — tests use factories directly; production bootstrap of the first policy row is flagged as a real, unresolved gap for a future session.
 
 ## Validation performed
-- `docker compose up --build` (real), `docker compose ps` (0 restarts on `app`/`worker`), `curl localhost:8000/up` → 200.
-- `docker compose exec app php artisan migrate` → `migrate:rollback --step=6` → `migrate` again — all clean (the up/down/up parity check `04-data-model.md` requires).
-- `docker compose exec app php artisan test` → **16/16 passed**, including a real hash-chain tamper-detection test.
+- `docker compose exec app php artisan migrate` → `migrate:rollback --step=3` → `migrate` again — clean (up/down/up parity check).
+- `docker compose exec app php artisan test` → **34/34 passed** (16 pre-existing + 18 new), including both fail-closed fault-injection tests and the direct-DB-write check-constraint test.
 - `composer lint` (Pint) → pass. `composer analyse` (Larastan level 8) → **0 errors**.
-- `npm run lint` (ESLint) → pass. `npm run build` (Vite) → pass.
-- `docs/architecture/openapi.yaml` validated with `openapi-spec-validator` (the actual tool CI uses) via a throwaway `python:3.12-slim` container.
+- `docs/architecture/openapi.yaml` re-validated with `openapi-spec-validator` via a throwaway `python:3.12-slim` container (same tool CI uses).
 
 ## Open questions and risks
-- **DB-level grant revocation on `audit_log_entries`/`consent_notices` (ADR-0003, `04-data-model.md`) is not implemented** — needs a second, non-owning Postgres role before it's implementable at all. See Part 3 and **`R-01` in `docs/project-memory/10-risk-register.md`** (the durable record — this file is overwritten every session). Recommend addressing at Session 8 (deployment/operations) alongside the periodic chain-anchoring job, since both are "make the audit log genuinely tamper-resistant against a privileged attacker" work.
-- Full ABAC `PolicyEvaluator` + `policy_definitions` table remain unbuilt — unchanged from the existing Session 7 plan, not newly discovered scope.
+- **No policy-row bootstrap mechanism exists** (see gap #3 above, tracked as **`R-02` in `10-risk-register.md`**) — a fresh instance cannot verify any DSAR identity until an operator or a future `policy.update` action inserts the `dsar.identity.verify` row by hand. Low severity (fails safe, not open) but real on every fresh install — review before Session 8 (deployment), same timeline as `R-01`.
+- **Separation-of-duties and US-006 AC2 remain untestable** until erasure approval (US-007-adjacent) exists — see gap #1/#2 above.
+- `R-01` (audit-log DB-grant gap) — unchanged, still Session 8 scope.
+- Full ABAC exhaustive (role × action) test suite — unchanged, still Session 7 scope.
 
 ## Next recommended session
-- Proposed session title: **Session 6b — Feature Slice: DSAR Intake and Identity Verification**
-- Single objective: US-005 and US-006 (`02-requirements.md`) — public DSAR submission with rate limiting (NFR-006), signed status-tracking link, and the identity-verification gate (FR-007) — this is the first slice that actually needs a real sensitive-action + ABAC decision (`dsar.identity.verify`), so it's also a natural place to start standing up the `PolicyEvaluator`/`policy_definitions` table rather than waiting for Session 7 to build it in one large batch.
-- Inputs required: `docs/architecture/openapi.yaml` (`/dsar`, `/dsar/status/{signedToken}`, `/admin/dsar/{dsarId}/verify-identity`), ADR-0001, `docs/project-memory/06-security-threat-model.md` (rate limiting, signed links).
-- Definition of done: US-005/US-006 acceptance criteria pass as real, executed Pest feature tests, matching the OpenAPI contract exactly, with every identity-verification decision audit-logged with a policy ID (the first real use of that field, which has been `null` for every audit entry so far in this slice).
+- Proposed session title: **Session 7 (or 6c) — Erasure Approval + Separation of Duties**
+- Single objective: `POST /admin/dsar/{dsarId}/approve-erasure` (US-006's remaining half), which requires: (1) extending `PolicyEvaluator`'s condition matcher with a subject-vs-resource-attribute comparison operator (e.g. `not_equals_attribute`) so the `dsar.erasure.approve` policy can express `actor.id != dsar.identity_verified_by`, as ADR-0001 specifies; (2) a `PolicyDefinition` row for `dsar.erasure.approve`; (3) the two acceptance criteria this session explicitly could not test — separation of duties, and "an unverified DSAR refuses any export/erasure attempt" (the latter may still need a minimal task-attempt stub rather than the full US-007 orchestration, if US-007 itself isn't in scope yet).
+- A secondary, smaller candidate if erasure approval is deferred further: decide and implement how the first `dsar.identity.verify` policy row gets onto a fresh instance (seeder vs. `policy.update` admin action vs. install-time step) — tracked as `R-02` in `10-risk-register.md`, currently a real gap, not just a documented one.
+- Inputs required: `docs/architecture/openapi.yaml` (`/admin/dsar/{dsarId}/approve-erasure`), `docs/adr/ADR-0001-abac-policy-model.md` (separation-of-duties design), this file.
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 6a complete and **pushed to `origin/main`** (`97868f1..67d7b1b`, including the risk-register entry for `R-01`).
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 6b complete and **pushed to `origin/main`**.
 
-**Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible storage. No stack changes this session (the CVE question resolved as not-applicable, no version bumps made).
+**Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible storage. No stack changes this session.
 
-**Architecture decisions that must not be reversed:** all decisions from Sessions 0–5 remain in force. Session 6a added no new ADR and reversed nothing — it applied ADR-0001 (correctly scoping ABAC to its own enumerated sensitive-action list) and ADR-0003 (hash-chain now real; DB-grant half explicitly flagged as not yet implementable without new infrastructure).
+**Architecture decisions that must not be reversed:** all decisions from Sessions 0–6a remain in force. This session added no new ADR — it implemented ADR-0001 (PolicyEvaluator, for real, for the first time) and proved ADR-0006 (fail-closed) against genuine fault injection rather than leaving it as an untested design intent.
 
 **Implementation state:**
-- Done: consent-capture vertical slice (US-001–US-004) — purposes, versioned notices, capture, withdrawal — migrations through tests, all real and passing. Environment is now genuinely booted and verified, not just syntax-checked. Lock files committed and pushed.
+- Done: consent-capture slice (US-001–004, Session 6a); DSAR submission + status + identity verification (US-005/006, this session) — migrations through tests, all real and passing.
 - In progress: nothing mid-flight.
-- **Known gap to check first:** none blocking — `R-01` (audit-log DB-grant gap, `10-risk-register.md`) is tracked but not a blocker for DSAR work; it's Session 8 scope.
-- Not started: DSAR, retention, RoPA, connector, and full ABAC/PolicyEvaluator — unchanged scope, all still ahead.
+- **Known gap to check first:** no `dsar.identity.verify` `PolicyDefinition` row exists on a fresh instance by default — any manual testing/demoing of identity verification needs one created first (via tinker/factory/seeder), or it will (correctly) fail closed.
+- Not started: erasure approval (and thus separation-of-duties), DSAR task orchestration (US-007), export bundles (US-008), retention, RoPA, connectors, the full ABAC test matrix.
 
-**Constraints and non-goals:** unchanged since Session 1. Still at the 2-new-technology cap (ABAC, ASVS L2) — this session added no third.
+**Constraints and non-goals:** unchanged since Session 1. Still at the 2-new-technology cap (ABAC, ASVS L2).
 
-**Task for next session (single objective):** Implement DSAR submission + identity verification (US-005, US-006) end to end, standing up the first real `PolicyEvaluator` sensitive-action (`dsar.identity.verify`) rather than waiting for a single big-bang Session 7.
+**Task for next session (single objective):** erasure approval + separation-of-duties (see "Next recommended session" above) — this is what actually completes US-006, and it's the first place `PolicyEvaluator`'s condition matcher needs to compare two attributes against each other rather than just checking membership/equality against a fixed value.
 
 **Files to attach or paste:**
 - `docs/architecture/openapi.yaml`
 - `docs/adr/ADR-0001-abac-policy-model.md`
-- `docs/project-memory/06-security-threat-model.md`
+- `docs/adr/ADR-0006-policy-evaluator-fail-closed.md`
 - `docs/project-memory/12-session-handoff.md` (this file)
 
-**Ground rules:** Do not change the stack. Do not reopen any decision from Sessions 0–5. The consent-capture slice's audit log has never had a non-null `policy_id` yet — this next slice is where that field gets exercised for real for the first time, so double-check the `AuditLogger`/`PolicyEvaluator` integration actually populates it rather than leaving it null out of habit.
+**Ground rules:** Do not change the stack. Do not reopen any decision from Sessions 0–6a. Do not fake a separation-of-duties test — it is genuinely impossible until erasure approval exists, and this file explains exactly why.

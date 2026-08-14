@@ -25,6 +25,7 @@ class AuditLogEntry extends Model
         'resource_id',
         'policy_id',
         'decision',
+        'reason_code',
         'prev_hash',
         'entry_hash',
         'created_at',
