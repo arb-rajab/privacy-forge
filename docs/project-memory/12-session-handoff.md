@@ -9,7 +9,7 @@
 ## Session completed
 - Session number and title: **Session 6a — Real Environment Verification + Feature Slice: Consent Capture**
 - Objective: (1) actually boot the Session 5 environment for the first time and fix whatever a real `docker compose up --build` surfaces; (2) resolve the open CVE-2026-48019 question with a real source; (3) implement the consent-capture vertical slice (purposes, versioned notices, capture, withdrawal) end to end against the validated OpenAPI contract.
-- Status: **complete** — all three objectives done, 16/16 feature tests passing for real against a live Postgres instance, `composer lint` / `composer analyse` (Larastan level 8) / `npm run lint` / `npm run build` all green.
+- Status: **complete and pushed** — all three objectives done, 16/16 feature tests passing for real against a live Postgres instance, `composer lint` / `composer analyse` (Larastan level 8) / `npm run lint` / `npm run build` all green. Commits `d0785f2`, `30dffc1`, and a follow-up `67d7b1b` (risk register entry, see below) are all on `origin/main`.
 
 ## Part 1 — Real environment verification (this had never actually been booted)
 
@@ -75,6 +75,8 @@ Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by
 
 **Recommendation for whichever session picks this up** (likely Session 8, deployment/operations, given periodic anchoring is already scoped there): introduce a second Postgres role — an `owner`/migration role distinct from the app's runtime connection role — then the `REVOKE` becomes real. Until then, this should not be silently assumed to already provide DB-level protection.
 
+**Tracked durably as `R-01` in `docs/project-memory/10-risk-register.md`** — this handoff section explains the gap, but the register (not this file, which gets overwritten every session) is what's supposed to persist and get reviewed before Session 8.
+
 ## Files created or changed
 
 **Environment/CI fixes:** `phpunit.xml.dist`, `.eslintrc.cjs`, `composer.lock`, `package-lock.json`, `tests/Unit/.gitkeep`, `app/Http/Middleware/HandleInertiaRequests.php`, `resources/js/Pages/Welcome.vue`, `.github/workflows/ci.yml`, plus Pint auto-fixes across 7 files (see commit `d0785f2`).
@@ -94,6 +96,7 @@ Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by
 - `routes/api.php` — all 6 endpoints, admin routes under `Route::middleware(['web', 'auth'])` (no Sanctum dependency added; this is the built-in-only way to get session-cookie auth on `api.php`-registered routes).
 - `tests/Feature/{ConsentPurposeTest,ConsentNoticeTest,ConsentCaptureTest,ConsentWithdrawalTest}.php` — 16 tests total, all passing against a live Postgres instance.
 - `tests/Pest.php` — added `RefreshDatabase` globally for `Feature` tests.
+- `docs/project-memory/10-risk-register.md` — added `R-01` for the ADR-0003 DB-grant gap (see Part 3), committed and pushed separately (`67d7b1b`) as its own small commit rather than folded into the feature-slice commit.
 
 ## Decisions made
 - **No ADR for the CVE question** — resolved as not applicable, not as a version bump. See Part 2.
@@ -109,8 +112,7 @@ Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by
 - `docs/architecture/openapi.yaml` validated with `openapi-spec-validator` (the actual tool CI uses) via a throwaway `python:3.12-slim` container.
 
 ## Open questions and risks
-- **DB-level grant revocation on `audit_log_entries`/`consent_notices` (ADR-0003, `04-data-model.md`) is not implemented** — needs a second, non-owning Postgres role before it's implementable at all. See Part 3. Recommend addressing at Session 8 (deployment/operations) alongside the periodic chain-anchoring job, since both are "make the audit log genuinely tamper-resistant against a privileged attacker" work.
-- **Local commits are not yet pushed to `origin/main`** — this session made real changes (environment fixes + the full consent-capture slice) but did not push, since pushing is a shared-state action outside this session's implicit authorization. Confirm with whoever resumes whether to push, and to which branch.
+- **DB-level grant revocation on `audit_log_entries`/`consent_notices` (ADR-0003, `04-data-model.md`) is not implemented** — needs a second, non-owning Postgres role before it's implementable at all. See Part 3 and **`R-01` in `docs/project-memory/10-risk-register.md`** (the durable record — this file is overwritten every session). Recommend addressing at Session 8 (deployment/operations) alongside the periodic chain-anchoring job, since both are "make the audit log genuinely tamper-resistant against a privileged attacker" work.
 - Full ABAC `PolicyEvaluator` + `policy_definitions` table remain unbuilt — unchanged from the existing Session 7 plan, not newly discovered scope.
 
 ## Next recommended session
@@ -123,16 +125,16 @@ Laravel's `JsonResource` wraps every response in a `{"data": {...}}` envelope by
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 6a complete, **not yet pushed** — confirm push status before assuming `origin/main` matches local state.
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 6a complete and **pushed to `origin/main`** (`97868f1..67d7b1b`, including the risk-register entry for `R-01`).
 
 **Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible storage. No stack changes this session (the CVE question resolved as not-applicable, no version bumps made).
 
 **Architecture decisions that must not be reversed:** all decisions from Sessions 0–5 remain in force. Session 6a added no new ADR and reversed nothing — it applied ADR-0001 (correctly scoping ABAC to its own enumerated sensitive-action list) and ADR-0003 (hash-chain now real; DB-grant half explicitly flagged as not yet implementable without new infrastructure).
 
 **Implementation state:**
-- Done: consent-capture vertical slice (US-001–US-004) — purposes, versioned notices, capture, withdrawal — migrations through tests, all real and passing. Environment is now genuinely booted and verified, not just syntax-checked. Lock files committed.
+- Done: consent-capture vertical slice (US-001–US-004) — purposes, versioned notices, capture, withdrawal — migrations through tests, all real and passing. Environment is now genuinely booted and verified, not just syntax-checked. Lock files committed and pushed.
 - In progress: nothing mid-flight.
-- **Known gap to check first:** local commits from this session are not pushed — verify `origin/main` state before starting new work. Confirm whether to push before or as part of the next session.
+- **Known gap to check first:** none blocking — `R-01` (audit-log DB-grant gap, `10-risk-register.md`) is tracked but not a blocker for DSAR work; it's Session 8 scope.
 - Not started: DSAR, retention, RoPA, connector, and full ABAC/PolicyEvaluator — unchanged scope, all still ahead.
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the 2-new-technology cap (ABAC, ASVS L2) — this session added no third.
