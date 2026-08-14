@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use Illuminate\Http\Request;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -14,7 +15,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * Determine the current asset version.
      */
-    public function version(\Illuminate\Http\Request $request): ?string
+    public function version(Request $request): ?string
     {
         return parent::version($request);
     }
@@ -26,8 +27,10 @@ class HandleInertiaRequests extends Middleware
      * capabilities, and demo-mode flags (per the Demo Instance Data Safety
      * design in 06-security-threat-model.md) get added here once the
      * auth/ABAC layer exists, at Session 6.
+     *
+     * @return array<string, mixed>
      */
-    public function share(\Illuminate\Http\Request $request): array
+    public function share(Request $request): array
     {
         return [
             ...parent::share($request),

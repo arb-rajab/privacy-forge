@@ -10,7 +10,7 @@ define('LARAVEL_START', microtime(true));
 // is served without hitting the framework at all.
 if ($uri = $_SERVER['REQUEST_URI'] ?? null) {
     $publicPath = __DIR__.parse_url($uri, PHP_URL_PATH);
-    if ($uri !== '/' && file_exists($publicPath) && !is_dir($publicPath)) {
+    if ($uri !== '/' && file_exists($publicPath) && ! is_dir($publicPath)) {
         return false;
     }
 }
