@@ -19,9 +19,11 @@
 
 use App\Http\Controllers\Admin\ConsentNoticeController;
 use App\Http\Controllers\Admin\ConsentPurposeController;
+use App\Http\Controllers\Admin\DataCategoryController;
 use App\Http\Controllers\Admin\DsarController as AdminDsarController;
 use App\Http\Controllers\Admin\DsarQueueController;
 use App\Http\Controllers\Admin\PolicyController;
+use App\Http\Controllers\Admin\RetentionPolicyController;
 use App\Http\Controllers\ConnectorCallbackController;
 use App\Http\Controllers\ConsentController;
 use App\Http\Controllers\DsarController;
@@ -67,5 +69,17 @@ Route::prefix('v1')->group(function () {
         Route::get('/policies', [PolicyController::class, 'index']);
         Route::get('/policies/{policyId}', [PolicyController::class, 'show']);
         Route::patch('/policies/{policyId}', [PolicyController::class, 'update']);
+
+        // retention.policy.manage (Session 11, ADR-0002/US-010/US-011) —
+        // the fourth registered sensitive action. Every route below,
+        // including the dry-run preview, is gated by the same
+        // PolicyEvaluator call (Owner or Privacy Manager).
+        Route::get('/data-categories', [DataCategoryController::class, 'index']);
+        Route::post('/data-categories', [DataCategoryController::class, 'store']);
+        Route::get('/retention-policies', [RetentionPolicyController::class, 'index']);
+        Route::post('/retention-policies', [RetentionPolicyController::class, 'store']);
+        Route::get('/retention-policies/{policyId}', [RetentionPolicyController::class, 'show']);
+        Route::patch('/retention-policies/{policyId}', [RetentionPolicyController::class, 'update']);
+        Route::post('/retention-policies/{policyId}/dry-run', [RetentionPolicyController::class, 'dryRun']);
     });
 });

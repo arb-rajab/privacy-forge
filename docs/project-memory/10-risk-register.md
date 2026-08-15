@@ -1,12 +1,12 @@
 # Risk Register
 > Purpose: known risks, owned and reviewed rather than forgotten
 > Project: privacy-forge (public)
-> Last updated: 2026-08-15
+> Last updated: 2026-08-16
 
 | ID | Risk | Category | Impact | Likelihood | Mitigation | Status | Review date |
 |---|---|---|---|---|---|---|---|
 | R-01 | Audit log lacks DB-level grant revocation (ADR-0003) — app's Postgres role owns the table, so privileges can't be revoked from itself | Security | Medium | Low (requires DB credential compromise) | Hash chain still provides tamper-evidence independently; needs a second, lower-privileged migration-only DB role to fully implement | Open | Before Session 8 (deployment) |
-| R-02 | No seeding/bootstrap mechanism exists for `PolicyDefinition` rows — a fresh instance has no active `dsar.identity.verify`, `dsar.erasure.approve`, or (as of Session 10) `policy.update` policy until each is inserted manually. **Unchanged by Session 10**: `PolicyController` (built this session) can only view/supersede an *existing* row — it has no "create the first row for a brand-new action" path, so it doesn't double as the bootstrap step R-02 originally floated as a candidate fix. | Operability | Low (fails safe, not open — ADR-0006 fail-closed denies everyone rather than granting access; this is an availability/usability gap, not a security exposure) | High (true on every fresh install by default) | None yet; a `database/seeders/` bootstrap remains the most direct fix | Open | Before deployment |
+| R-02 | No seeding/bootstrap mechanism exists for `PolicyDefinition` rows — a fresh instance has no active `dsar.identity.verify`, `dsar.erasure.approve`, `policy.update` (Session 10), or (as of Session 11) `retention.policy.manage` policy until each is inserted manually. **Unchanged by Session 11**: `RetentionPolicyController`/`DataCategoryController` (built this session) can only operate once a `retention.policy.manage` row already exists — same gap `PolicyController` left open at Session 10, now a fourth instance of the same pattern rather than a new one. | Operability | Low (fails safe, not open — ADR-0006 fail-closed denies everyone rather than granting access; this is an availability/usability gap, not a security exposure) | High (true on every fresh install by default) | None yet; a `database/seeders/` bootstrap remains the most direct fix | Open | Before deployment |
 
 ## Closed risks
 

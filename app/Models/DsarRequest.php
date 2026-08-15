@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 // US-005/US-006. subject_identifier is encrypted at rest (Laravel's
 // `encrypted` cast, keyed on APP_KEY) rather than one-way hashed like
@@ -93,5 +94,19 @@ class DsarRequest extends Model
     public static function hashIdentifier(string $subjectIdentifier): string
     {
         return hash_hmac('sha256', $subjectIdentifier, config('app.key'));
+    }
+
+    // Retention-driven anonymisation (US-012): severs both identifying
+    // columns while keeping status/request_type/timestamps intact for
+    // aggregate/statistical value — no delete-guard exists on this model
+    // (unlike ConsentRecord), so retention's "erase" action calls the
+    // plain delete() below directly; this method exists only for
+    // "anonymise" policies.
+    public function anonymise(): void
+    {
+        $this->forceFill([
+            'subject_identifier' => 'anonymised',
+            'subject_identifier_hash' => 'anonymised-'.(string) Str::uuid(),
+        ])->save();
     }
 }

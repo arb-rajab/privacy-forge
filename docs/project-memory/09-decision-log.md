@@ -78,6 +78,49 @@ detail.
   itself was **not** reopened or changed — the code was right, the
   documentation was stale.
 
+## Deletion certificate format — shared table, two sources (Session 11, 2026-08-16)
+- **Decision:** `DELETION_CERTIFICATE` remains a single shared table for
+  both DSAR-driven erasure (US-009) and retention-driven deletion
+  (US-012) — this was already the ERD's design since Session 3
+  (`RETENTION_EXECUTION ||--o| DELETION_CERTIFICATE`), not a new
+  redesign. What Session 11 adds: a DB CHECK constraint
+  (`deletion_certificates_exactly_one_source`) requiring exactly one of
+  `dsar_request_id`/`retention_execution_id` to be set, so the two
+  sources are structurally distinguishable rather than merely
+  conventionally so.
+- **Alternative considered:** a second, retention-specific certificate
+  table. Rejected — the ERD never called for two tables, `summary`/
+  `exceptions` mean the same thing regardless of source, and a second
+  table would need its own versioning/indexing/testing for no
+  differentiating benefit.
+- **Not an ADR:** this is an implementation detail within ADR-0002's
+  existing scope (a real run "produces a certificate," per that ADR's
+  consequences), not a new architectural trade-off — logged here per the
+  same judgement call Session 7 made for cross-field vs. fail-closed
+  documentation-only decisions.
+
+## Retention execution: scheduler boundary, not a new ABAC action (Session 11, 2026-08-16)
+- **Decision:** the scheduled real-run
+  (`App\Console\Commands\ExecuteRetentionPoliciesCommand`) is not gated by
+  `PolicyEvaluator`. The one new sensitive action this session adds,
+  `retention.policy.manage`, covers data-category/retention-policy CRUD
+  and the dry-run preview — all staff-initiated, HTTP-request-driven
+  actions. The scheduled run itself is triggered by Laravel's scheduler,
+  not a staff HTTP request, and `03-architecture.md`'s component
+  responsibility table is explicit that a worker/scheduler "executes what
+  has already been authorised, it does not re-decide."
+- **Must not be silently reversed because:** ADR-0001 anticipated
+  "retention policy execution" as a sensitive action; this decision is
+  why that specific gate was not built as a separate `PolicyEvaluator`
+  call site, and a future session should not assume its absence is an
+  oversight. If a manual "run now" HTTP trigger is ever added, *that*
+  endpoint would need its own gate (most naturally reusing
+  `retention.policy.manage`) — the scheduled path would stay ungated for
+  the same reason stated here.
+- Still audit-logged (`actor_type: system`, `policy_id: null`) per
+  US-014's blanket requirement that every retention action is logged,
+  independent of whether an ABAC decision was made.
+
 ## ADR-0005 — Single-Organisation Data Model (No Tenant Column)
 - **Date:** 2026-08-11 · **Status:** accepted · [Full ADR](../adr/ADR-0005-single-organisation-data-model.md)
 - **Decision:** no tenant/org column anywhere in the schema; a

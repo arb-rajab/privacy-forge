@@ -12,6 +12,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 // connector confirmed erasure; a non-null value explicitly names which
 // connector(s) could not confirm, because FR-011 forbids ever overstating
 // what was achieved. See App\Services\DeletionCertificateGenerator.
+//
+// Shared table, two sources (Session 11 decision, see
+// docs/project-memory/09-decision-log.md): a certificate is produced by
+// either a DSAR erasure (US-009, `dsar_request_id` set) or a retention
+// execution (US-012, `retention_execution_id` set), never both and never
+// neither — enforced by a DB CHECK constraint
+// (`deletion_certificates_exactly_one_source`), not just application
+// convention.
 class DeletionCertificate extends Model
 {
     /** @use HasFactory<DeletionCertificateFactory> */
@@ -37,5 +45,13 @@ class DeletionCertificate extends Model
     public function dsarRequest(): BelongsTo
     {
         return $this->belongsTo(DsarRequest::class);
+    }
+
+    /**
+     * @return BelongsTo<RetentionExecution, $this>
+     */
+    public function retentionExecution(): BelongsTo
+    {
+        return $this->belongsTo(RetentionExecution::class);
     }
 }

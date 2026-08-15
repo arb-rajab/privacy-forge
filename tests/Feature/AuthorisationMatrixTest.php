@@ -16,22 +16,27 @@ use App\Models\User;
 // ADR-0001's Option C names the intended sensitive-action registry:
 // DSAR identity verification, DSAR export approval, DSAR erasure
 // approval, retention policy execution, and audit log access. ADR-0006
-// adds a sixth: policy.update. Reading the actual
-// `PolicyEvaluator::evaluate()` call sites in app/Http/Controllers is the
-// only reliable source of truth for what is *actually* registered and
-// gated. As of Session 10, there are exactly three:
-//   - dsar.identity.verify  (App\Http\Controllers\Admin\DsarController::verifyIdentity)
-//   - dsar.erasure.approve  (App\Http\Controllers\Admin\DsarController::approveErasure)
-//   - policy.update         (App\Http\Controllers\Admin\PolicyController::index/show/update)
+// adds policy.update; Session 11 adds retention.policy.manage. Reading
+// the actual `PolicyEvaluator::evaluate()` call sites in
+// app/Http/Controllers is the only reliable source of truth for what is
+// *actually* registered and gated. As of Session 11, there are exactly
+// four:
+//   - dsar.identity.verify       (App\Http\Controllers\Admin\DsarController::verifyIdentity)
+//   - dsar.erasure.approve       (App\Http\Controllers\Admin\DsarController::approveErasure)
+//   - policy.update              (App\Http\Controllers\Admin\PolicyController::index/show/update)
+//   - retention.policy.manage    (App\Http\Controllers\Admin\DataCategoryController::index/store,
+//                                  App\Http\Controllers\Admin\RetentionPolicyController::index/show/store/update/dryRun)
 // "DSAR export approval" was never built as a separate gate — Session 8
 // wired export/access dispatch to fire at identity-verification time
 // instead (see DsarController::verifyIdentity's comment), so it is not a
 // distinct action to test; it is already covered by the
-// dsar.identity.verify rows below. Retention execution and audit log
-// access still have no controller, route, or PolicyDefinition
-// action_name in use anywhere in the codebase — **not applicable yet**,
-// not silently omitted; see the "Not-yet-built sensitive actions" section
-// below for why, one row each.
+// dsar.identity.verify rows below. Audit log access still has no
+// controller, route, or PolicyDefinition action_name in use anywhere in
+// the codebase — **not applicable yet**, not silently omitted; see the
+// "Not-yet-built sensitive actions" section below. Retention policy
+// *execution* (the specific action ADR-0001 originally anticipated,
+// gating the scheduled real-run itself) is also addressed there — it is
+// deliberately NOT ABAC-gated, by design, not because it was forgotten.
 //
 // policy.update (Session 10, closing R-03 —
 // docs/project-memory/10-risk-register.md): PolicyController exposes
@@ -50,6 +55,17 @@ use App\Models\User;
 // evaluated adding an HTTP connector-management endpoint and decided
 // against it (see docs/project-memory/12-session-handoff.md) — connector
 // management remains CLI-only, so this remains correct, not a gap.
+//
+// retention.policy.manage (Session 11, US-010/US-011, ADR-0002): covers
+// data-category/retention-policy CRUD and the dry-run preview endpoint —
+// all five of DataCategoryController/RetentionPolicyController's actions
+// share this one gate, the same "view and edit share it" reasoning as
+// policy.update. The dataset below tests POST /admin/data-categories
+// (creation) as the representative endpoint, since it has no dependent
+// resource to set up first; the remaining four endpoints are covered in
+// tests/Feature/RetentionPolicyManagementTest.php, per the same
+// cross-reference-rather-than-duplicate approach used elsewhere in this
+// file.
 //
 // Roles tested: Owner, Privacy Manager, Support Staff (all real `users`
 // rows — the `role` column is a 3-value DB enum, confirmed by reading
@@ -103,12 +119,19 @@ dataset('nfr005_role_action_matrix', [
     'Support Staff × policy.update → deny' => ['support_staff', 'policy.update', 'deny'],
     'Data Subject × policy.update → deny (unauthenticated)' => ['data_subject', 'policy.update', 'deny'],
     'Connector × policy.update → deny (unauthenticated)' => ['connector', 'policy.update', 'deny'],
+
+    'Owner × retention.policy.manage → allow' => ['owner', 'retention.policy.manage', 'allow'],
+    'Privacy Manager × retention.policy.manage → allow' => ['privacy_manager', 'retention.policy.manage', 'allow'],
+    'Support Staff × retention.policy.manage → deny' => ['support_staff', 'retention.policy.manage', 'deny'],
+    'Data Subject × retention.policy.manage → deny (unauthenticated)' => ['data_subject', 'retention.policy.manage', 'deny'],
+    'Connector × retention.policy.manage → deny (unauthenticated)' => ['connector', 'retention.policy.manage', 'deny'],
 ]);
 
 test('(role × sensitive action) matrix cell matches the documented permissions matrix', function (string $roleLabel, string $action, string $expected) {
     PolicyDefinition::factory()->create(); // dsar.identity.verify, v1, active
     PolicyDefinition::factory()->forErasureApproval()->create(); // dsar.erasure.approve, v1, active
     PolicyDefinition::factory()->forPolicyUpdate()->create(); // policy.update, v1, active
+    PolicyDefinition::factory()->forRetentionPolicyManage()->create(); // retention.policy.manage, v1, active
 
     // A distinct "someone else" verifier so dsar.erasure.approve's own
     // separation-of-duties condition never fires as a side effect of
@@ -132,15 +155,24 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
             'identity_verified_by' => $otherVerifier->id,
             'identity_verified_at' => now(),
         ]),
-        'policy.update' => null,
+        'policy.update', 'retention.policy.manage' => null,
     };
 
-    $resourceId = $action === 'policy.update' ? $targetPolicy->id : $dsar->id;
+    $resourceId = match ($action) {
+        'policy.update' => $targetPolicy->id,
+        // DataCategoryController::store evaluates against the same
+        // nil-UUID "no single resource yet" sentinel PolicyController's
+        // index() uses — there is no DataCategory row until (and unless)
+        // the request is allowed.
+        'retention.policy.manage' => '00000000-0000-0000-0000-000000000000',
+        default => $dsar->id,
+    };
 
     $endpoint = match ($action) {
         'dsar.identity.verify' => "/api/v1/admin/dsar/{$dsar->id}/verify-identity",
         'dsar.erasure.approve' => "/api/v1/admin/dsar/{$dsar->id}/approve-erasure",
         'policy.update' => "/api/v1/admin/policies/{$targetPolicy->id}",
+        'retention.policy.manage' => '/api/v1/admin/data-categories',
     };
 
     $actor = match ($roleLabel) {
@@ -156,15 +188,22 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         'data_subject', 'connector' => null,
     };
 
+    $retentionPayload = ['name' => 'Test category', 'sensitivity' => 'standard', 'subject_table' => 'consent_records'];
+
     $response = match (true) {
         $action === 'policy.update' && $actor === null => $this->patchJson($endpoint, ['effect' => 'allow']),
         $action === 'policy.update' => $this->actingAs($actor)->patchJson($endpoint, ['effect' => 'allow']),
+        $action === 'retention.policy.manage' && $actor === null => $this->postJson($endpoint, $retentionPayload),
+        $action === 'retention.policy.manage' => $this->actingAs($actor)->postJson($endpoint, $retentionPayload),
         $actor === null => $this->postJson($endpoint),
         default => $this->actingAs($actor)->postJson($endpoint),
     };
 
     if ($expected === 'allow') {
-        $response->assertStatus(200);
+        // retention.policy.manage's representative endpoint is a POST
+        // that creates a new DataCategory (201) — every other action's
+        // representative endpoint acts on an existing resource (200).
+        $response->assertStatus($action === 'retention.policy.manage' ? 201 : 200);
 
         $entry = AuditLogEntry::query()
             ->where('action', $action)
@@ -206,8 +245,23 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
 // exactly what "not applicable yet" is standing in for, and will need to
 // be replaced with real matrix rows (see the dataset above) the session
 // that builds the corresponding action.
-test('retention policy execution has no registered action yet — not applicable to this matrix (US-010/011/012 not started)', function () {
-    expect(PolicyDefinition::query()->where('action_name', 'like', 'retention.%')->exists())->toBeFalse();
+//
+// retention.policy.manage (Session 11) is removed from this table, not
+// because it stopped being relevant, but because it moved into the real
+// coverage dataset above — the same way policy.update did at Session 10.
+test('retention execution itself is deliberately not a separate registered ABAC action (Session 11, see docs/project-memory/09-decision-log.md)', function () {
+    // ADR-0001 anticipated "retention policy execution" as a sensitive
+    // action; this session found the scheduled real-run
+    // (App\Console\Commands\ExecuteRetentionPoliciesCommand) sits on the
+    // scheduler/worker side of the boundary 03-architecture.md draws
+    // explicitly ("a worker executes what has already been authorised, it
+    // does not re-decide") and so is structurally not a PolicyEvaluator
+    // call site — the authorisation event is retention.policy.manage, at
+    // policy definition/update time, not at scheduled-run time. Asserted
+    // here (not just noted in prose) so a future session that adds a
+    // manual "run now" HTTP trigger — which *would* need its own gate —
+    // has a failing assertion to update, not a silently stale comment.
+    expect(PolicyDefinition::query()->where('action_name', 'retention.execution.run')->exists())->toBeFalse();
 });
 
 test('audit log access has no registered action yet — not applicable to this matrix (no endpoint gates it)', function () {

@@ -366,10 +366,143 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /admin/data-categories:
+    get:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        List data categories (US-010). Gated by the retention.policy.manage
+        policy (Session 11) — viewing and editing share one gate, the same
+        reasoning ADR-0006 established for policy.update.
+      security: [{ staffAuth: [] }]
+      responses:
+        '200':
+          description: All data categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DataCategory' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: Define a data category (US-010)
+      security: [{ staffAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DataCategoryRequest' }
+      responses:
+        '201':
+          description: Data category created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataCategory' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/retention-policies:
+    get:
+      tags: [Admin — Purposes and Policies]
+      summary: List retention policies (all versions), gated by retention.policy.manage
+      security: [{ staffAuth: [] }]
+      responses:
+        '200':
+          description: All retention policies (active and deprecated versions)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RetentionPolicy' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+    post:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        Define a retention policy for a data category (FR-012, US-010).
+        Saved and versioned at version 1.
+      security: [{ staffAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetentionPolicyRequest' }
+      responses:
+        '201':
+          description: Retention policy created at version 1
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPolicy' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/retention-policies/{policyId}:
+    get:
+      tags: [Admin — Purposes and Policies]
+      summary: View a single retention policy
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The retention policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPolicy' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        Update a retention policy (FR-012, US-010). Retention policies are
+        versioned rows (04-data-model.md): this supersedes the current
+        row and creates the next version rather than mutating in place —
+        the same pattern already used for consent notices and ABAC policy
+        definitions. The governed data category cannot change across
+        versions.
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetentionPolicyUpdateRequest' }
+      responses:
+        '200':
+          description: Superseded — the new version is returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPolicy' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /admin/retention-policies/{policyId}/dry-run:
     post:
       tags: [Admin — Purposes and Policies]
-      summary: Preview a retention policy with no side effects (FR-012, US-011)
+      summary: >
+        Preview a retention policy with no side effects (FR-012, US-011).
+        Selection uses the same RetentionSelector query real execution
+        uses (ADR-0002) — the returned affected_record_count and a
+        subsequent real run's affected count are guaranteed identical
+        given unchanged data.
       security: [{ staffAuth: [] }]
       parameters:
         - name: policyId
@@ -382,6 +515,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RetentionPreview' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /admin/ropa/export:
     get:
@@ -648,6 +785,57 @@ components:
         resource_conditions: { type: object, additionalProperties: true, nullable: true }
         environment_conditions: { type: object, additionalProperties: true, nullable: true }
         effect: { type: string, enum: [allow, deny] }
+
+    DataCategory:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        sensitivity: { type: string, enum: [standard, elevated, special_category] }
+        subject_table:
+          type: string
+          enum: [consent_records, dsar_requests]
+          description: >
+            Which of this instance's own tables a governing RetentionPolicy
+            applies to. Deliberately excludes audit_log_entries and
+            deletion_certificates — those are evidentiary records with
+            their own indefinite retention (03-architecture.md, Backup and
+            Recovery), never a retention-policy target.
+
+    DataCategoryRequest:
+      type: object
+      required: [name, sensitivity, subject_table]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        sensitivity: { type: string, enum: [standard, elevated, special_category] }
+        subject_table: { type: string, enum: [consent_records, dsar_requests] }
+
+    RetentionPolicy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        data_category_id: { type: string, format: uuid }
+        retention_period_days: { type: integer }
+        post_expiry_action: { type: string, enum: [erase, anonymise] }
+        status: { type: string, enum: [active, deprecated] }
+        version: { type: integer }
+
+    RetentionPolicyRequest:
+      type: object
+      required: [data_category_id, retention_period_days, post_expiry_action]
+      properties:
+        data_category_id: { type: string, format: uuid }
+        retention_period_days: { type: integer, minimum: 1 }
+        post_expiry_action: { type: string, enum: [erase, anonymise] }
+
+    RetentionPolicyUpdateRequest:
+      type: object
+      required: [retention_period_days, post_expiry_action]
+      properties:
+        retention_period_days: { type: integer, minimum: 1 }
+        post_expiry_action: { type: string, enum: [erase, anonymise] }
 
     RetentionPreview:
       type: object

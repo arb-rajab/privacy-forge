@@ -57,4 +57,21 @@ class PolicyDefinitionFactory extends Factory
             'resource_conditions' => [],
         ]);
     }
+
+    // Session 11 — retention.policy.manage, the fourth registered sensitive
+    // action (data-category/retention-policy CRUD and dry-run). Owner or
+    // Privacy Manager, same shape as dsar.identity.verify, not Owner-only
+    // like policy.update — retention policy definition is Privacy Manager's
+    // day-to-day work per US-010/011 ("As a Privacy Manager, I want to
+    // define... preview...").
+    public function forRetentionPolicyManage(): static
+    {
+        return $this->state(fn () => [
+            'action_name' => 'retention.policy.manage',
+            'subject_conditions' => [
+                'role' => ['in' => ['owner', 'privacy_manager']],
+            ],
+            'resource_conditions' => [],
+        ]);
+    }
 }

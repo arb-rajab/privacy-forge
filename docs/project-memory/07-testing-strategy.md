@@ -12,7 +12,7 @@
 ### NFR-005 — exhaustive (role × sensitive-action) authorisation coverage
 
 **Status: satisfied for the registered-action set as it actually exists in
-code as of Session 10 (2026-08-15).** This is a narrower claim than "100% of
+code as of Session 11 (2026-08-16).** This is a narrower claim than "100% of
 every action this project will ever need," deliberately — see the
 discrepancy note below before reading this as the final word on ABAC
 coverage.
@@ -21,51 +21,65 @@ coverage.
 (the exhaustive role × action matrix itself, data-driven — every cell
 below is its own executed assertion, not a representative sample),
 cross-referencing `tests/Feature/DsarIdentityVerificationTest.php`,
-`tests/Feature/DsarErasureApprovalTest.php`, and (new this session)
-`tests/Feature/PolicyManagementTest.php` for cross-field and fail-closed
-cases (see "Delegated coverage" below for exactly what is and isn't
-duplicated).
+`tests/Feature/DsarErasureApprovalTest.php`, `tests/Feature/
+PolicyManagementTest.php`, and (new this session) `tests/Feature/
+RetentionPolicyManagementTest.php` for cross-field and fail-closed cases
+(see "Delegated coverage" below for exactly what is and isn't
+duplicated). The dry-run/real-execution *parity* guarantee itself
+(ADR-0002) is a separate, narrower claim from ABAC coverage and is
+asserted in its own file, `tests/Feature/RetentionDryRunParityTest.php`,
+not folded into this matrix.
 
-**Discrepancy found at Session 9, one third of it closed at Session 10:**
+**Discrepancy found at Session 9, now fully closed as of Session 11:**
 Session 9's brief assumed at least four registered sensitive actions
 (`dsar.identity.verify`, `dsar.erasure.approve`, `policy.update`, and a
 connector-management action from Session 8). Reading the actual
 `PolicyEvaluator::evaluate()` call sites found exactly two at that time.
 Session 10 built `policy.update` for real (`App\Http\Controllers\Admin\
-PolicyController`, closing `R-03`), bringing the registered-action count to
-**three**. Session 10 also evaluated adding an HTTP connector-management
-endpoint and decided against it (see `docs/project-memory/12-session-
-handoff.md`) — Session 8's `connectors:register-reference` remains an
-artisan console command with no HTTP route and no `PolicyEvaluator` call,
-so it still isn't a candidate for this matrix. The coverage table below is
-honest about testing 3 actions, not 4.
+PolicyController`, closing `R-03`), bringing the count to three — but also
+found the fourth assumed action (connector management) was never going to
+be built as an HTTP endpoint (see `docs/project-memory/12-session-
+handoff.md`), so "four" itself needed correcting, not just chasing.
+Session 11 registers a genuinely new fourth action, `retention.policy.manage`
+(`App\Http\Controllers\Admin\DataCategoryController`/
+`RetentionPolicyController`) — coincidentally restoring the count to four,
+but for a different reason than Session 9 originally assumed. The coverage
+table below is honest about testing exactly these four, not treating "four"
+as a target that was owed.
 
 #### Coverage table — every (role × registered action) pair
 
-| Role | dsar.identity.verify | dsar.erasure.approve | policy.update |
-|---|---|---|---|
-| Owner | ✅ allow — covered | ✅ allow — covered | ✅ allow — covered |
-| Privacy Manager | ✅ allow — covered | ✅ allow — covered | ✅ deny (`policy_conditions_not_met`) — covered |
-| Support Staff | ✅ deny (`policy_conditions_not_met`) — covered | ✅ deny (`policy_conditions_not_met`) — covered | ✅ deny (`policy_conditions_not_met`) — covered |
-| Data Subject | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered |
-| Connector | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered |
+| Role | dsar.identity.verify | dsar.erasure.approve | policy.update | retention.policy.manage |
+|---|---|---|---|---|
+| Owner | ✅ allow — covered | ✅ allow — covered | ✅ allow — covered | ✅ allow — covered |
+| Privacy Manager | ✅ allow — covered | ✅ allow — covered | ✅ deny (`policy_conditions_not_met`) — covered | ✅ allow — covered |
+| Support Staff | ✅ deny (`policy_conditions_not_met`) — covered | ✅ deny (`policy_conditions_not_met`) — covered | ✅ deny (`policy_conditions_not_met`) — covered | ✅ deny (`policy_conditions_not_met`) — covered |
+| Data Subject | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered |
+| Connector | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered | ✅ deny (401, unauthenticated — never reaches the evaluator) — covered |
 
-Unlike the other two actions, `policy.update` denies Privacy Manager —
-ADR-0006 names it Owner-only, not Owner-or-Privacy-Manager, so this column
-is a genuinely different shape from its neighbours, not a copy-paste.
+Unlike `policy.update`, `retention.policy.manage` admits Privacy Manager
+(same shape as `dsar.identity.verify`/`dsar.erasure.approve`) — ADR-0006
+names `policy.update` Owner-only specifically, but retention policy
+definition is Privacy Manager's day-to-day work per US-010/011, so this
+column is not a copy of its Owner-only neighbour.
 
-All 15 cells above execute as individual Pest dataset cases in
+All 20 cells above execute as individual Pest dataset cases in
 `AuthorisationMatrixTest.php` (PATCH `/admin/policies/{id}` is the
-representative endpoint for `policy.update`'s matrix cells; `index`/`show`
-sharing the same gate is covered instead in `PolicyManagementTest.php`, per
-the same cross-reference-not-duplicate approach used elsewhere in this
-file). Support Staff/Privacy-Manager denials are asserted against a real
-audit-log entry (`decision=deny`, `reason_code=policy_conditions_not_met`)
-produced by a live `PolicyEvaluator` run; Data Subject/Connector denials
-are asserted to produce **no** audit-log entry at all, because the
-`['web','auth']` middleware rejects them (`AuthenticationException` → 401
-per `bootstrap/app.php`) before the controller ever calls the evaluator —
-a materially different enforcement point from Support Staff's, called out
+representative endpoint for `policy.update`'s matrix cells; POST
+`/admin/data-categories` is the representative endpoint for
+`retention.policy.manage`'s — it has no dependent resource to set up
+first, unlike the retention-policy endpoints. `index`/`show` sharing the
+same gate, versioning-on-update, and dry-run also sharing the gate are
+covered instead in `PolicyManagementTest.php`/
+`RetentionPolicyManagementTest.php`, per the same cross-reference-not-
+duplicate approach used elsewhere in this file). Support Staff/Privacy-
+Manager denials are asserted against a real audit-log entry
+(`decision=deny`, `reason_code=policy_conditions_not_met`) produced by a
+live `PolicyEvaluator` run; Data Subject/Connector denials are asserted to
+produce **no** audit-log entry at all, because the `['web','auth']`
+middleware rejects them (`AuthenticationException` → 401 per
+`bootstrap/app.php`) before the controller ever calls the evaluator — a
+materially different enforcement point from Support Staff's, called out
 explicitly rather than treated as equivalent.
 
 #### Cross-field (separation-of-duties) coverage — delegated, not duplicated
@@ -99,8 +113,10 @@ out of scope for this session).
 | Malformed `not_equals_attribute` reference | `dsar.erasure.approve` | `DsarErasureApprovalTest.php` — "fail-closed: a malformed not_equals_attribute reference denies..." |
 | Missing active policy row | `policy.update` | `PolicyManagementTest.php` — "fail-closed: a missing policy.update policy denies..." (Session 10) |
 | Malformed condition spec | `policy.update` | `PolicyManagementTest.php` — "fail-closed: a malformed policy.update condition denies..." (Session 10) |
+| Missing active policy row | `retention.policy.manage` | `RetentionPolicyManagementTest.php` — "fail-closed: a missing retention.policy.manage policy denies..." (Session 11) |
+| Malformed condition spec | `retention.policy.manage` | `RetentionPolicyManagementTest.php` — "fail-closed: a malformed retention.policy.manage condition denies..." (Session 11) |
 
-All three registered actions have fail-closed coverage — broader than
+All four registered actions have fail-closed coverage — broader than
 Session 9's original minimum bar of "at least one action."
 
 #### Not-yet-built sensitive actions — explicitly not applicable, not omitted
@@ -114,18 +130,20 @@ session a real action/route is built for one of these.
 | Anticipated action | Why not applicable yet |
 |---|---|
 | DSAR export approval | Not a distinct action — Session 8 wired export/access dispatch to fire at `dsar.identity.verify` time instead, with no separate approval gate. Already covered by the `dsar.identity.verify` rows above. |
-| Retention policy execution | US-010/011/012 (retention) not started. |
+| Retention policy execution (the scheduled real-run itself) | Deliberately **not** a separate ABAC action, by design — not "not built yet". See `docs/project-memory/09-decision-log.md` ("Retention execution: scheduler boundary, not a new ABAC action", Session 11): the scheduled run sits on the worker/scheduler side of the boundary `03-architecture.md` draws ("a worker executes what has already been authorised, it does not re-decide"); the authorisation event is `retention.policy.manage`, at policy definition/update time. Asserted in `AuthorisationMatrixTest.php` ("retention execution itself is deliberately not a separate registered ABAC action") so a future session adding a manual "run now" HTTP trigger — which *would* need its own gate — has a failing assertion to update. |
 | Audit log access | No endpoint gates viewing the audit log via `PolicyEvaluator`. |
 
-`policy.update` is removed from this table as of Session 10 — it moved
-into the real coverage table above, not because it stopped being relevant.
+`policy.update` (Session 10) and `retention.policy.manage` (Session 11)
+are both removed from this table as they were added to the real coverage
+table above — not because either stopped being relevant.
 
 **NFR-005 verdict:** 100% of registered (role × action) pairs covered,
 zero discrepancies between observed and expected outcomes. Session 9 found
 one real test gap and closed it (Owner self-approval separation-of-duties);
-Session 10 closed `R-03` by building `policy.update` for real and adding it
-to this matrix, rather than leaving it as a permanent "not applicable yet"
-row.
+Session 10 closed `R-03` by building `policy.update` for real; Session 11
+registers `retention.policy.manage` as a fourth real action and adds it to
+this matrix, rather than leaving retention anywhere near a permanent "not
+applicable yet" row.
 
 ## Accessibility testing
 ## Performance testing and budgets
