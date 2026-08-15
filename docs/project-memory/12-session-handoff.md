@@ -9,7 +9,7 @@
 ## Session completed
 - Session number and title: **Session 8 — Connector Dispatch and Execution**
 - Objective: implement US-007/US-008/US-009 (FR-008/FR-009) against ADR-0004's async webhook contract — outbound signed dispatch, inbound signed callback, retry/backoff with partial-failure visibility, export bundle assembly, and deletion certificates.
-- Status: **complete, not yet pushed** — 75/75 feature+unit tests passing for real against live PostgreSQL + Redis (31 new this session), `composer lint` (Pint) and `composer analyse` (Larastan level 8) both clean, migrate → rollback → migrate parity confirmed for all 4 new migrations, `docs/architecture/openapi.yaml` re-validated with `openapi-spec-validator` (no changes were needed — every route this session added was already fully specified there).
+- Status: **complete and pushed to `origin/main`** — 75/75 feature+unit tests passing for real against live PostgreSQL + Redis (31 new this session), `composer lint` (Pint) and `composer analyse` (Larastan level 8) both clean, migrate → rollback → migrate parity confirmed for all 4 new migrations, `docs/architecture/openapi.yaml` re-validated with `openapi-spec-validator` (no changes were needed — every route this session added was already fully specified there).
 
 ## What was built
 
@@ -112,7 +112,7 @@ Four new migrations/models, matching `04-data-model.md`'s pre-existing forward-l
 
 **Project:** privacy-forge — self-hostable, single-organisation consent, DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 8 complete, **not yet pushed to `origin/main`** — confirm with the user before pushing.
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 8 complete and **pushed to `origin/main`**.
 
 **Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible storage. No stack changes this session; connector dispatch runs on the same Redis queue already provisioned for it (`worker` container in `docker-compose.yml`).
 
@@ -134,4 +134,4 @@ Four new migrations/models, matching `04-data-model.md`'s pre-existing forward-l
 - `docs/project-memory/12-session-handoff.md` (this file)
 - `docs/project-memory/02-requirements.md` (US-008/US-009 acceptance criteria)
 
-**Ground rules:** Do not change the stack. Do not reopen ADR-0004 or any other existing ADR. `R-01`/`R-02` remain open — do not fold a fix in silently; if either becomes trivial as a side effect, say so explicitly in its own commit. Confirm with the user before pushing this session's work to `origin/main`.
+**Ground rules:** Do not change the stack. Do not reopen ADR-0004 or any other existing ADR. `R-01`/`R-02` remain open — do not fold a fix in silently; if either becomes trivial as a side effect, say so explicitly in its own commit.
