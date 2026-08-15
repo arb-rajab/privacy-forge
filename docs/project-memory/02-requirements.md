@@ -8,11 +8,21 @@
 
 | Role | Can | Cannot |
 |---|---|---|
-| **Owner** (org admin) | Everything below, plus: manage staff accounts and roles, configure ABAC policies, view full audit log, configure demo/safety settings | Nothing withheld within the instance |
+| **Owner** (org admin) | Everything below, plus: manage staff accounts and roles, configure ABAC policies, view full audit log, configure demo/safety settings | Full capability access, subject to the same integrity controls (e.g. separation-of-duties) that apply system-wide — see ADR-0007, which deliberately denies an Owner who verified an identity from also approving that same DSAR's erasure. Role scope is not exempt from cross-field policy conditions.[^owner-abac] |
 | **Privacy Manager** | Define consent purposes and lawful bases; publish/version consent notices; define and dry-run retention policies; review and action DSARs (verify identity, approve export/erasure); view RoPA; view audit log entries related to their actions | Manage staff accounts/roles; change ABAC policy definitions; approve their own DSAR erasure without a second reviewer (separation-of-duties rule — not yet assigned an FR ID; to be formalised as an ABAC policy in Session 3, see handoff) |
 | **Support Staff** | Triage incoming DSARs (categorise, request more info from the data subject); view DSAR status; view non-sensitive consent records | Approve identity verification; approve or execute erasure; view the audit log; view or edit retention policies or RoPA |
 | **Data Subject** (external, unauthenticated except via signed link) | Give/view/withdraw their own consent via the public widget; submit a DSAR; view their own DSAR status via a signed link; download their own export bundle via a signed URL | View any other data subject's data; view staff-side screens; view the audit log; act without a valid signed link or session for anything beyond initial consent capture |
 | **Connector** (service account, machine-to-machine) | Receive erasure/export task callbacks via the connector webhook contract; report task completion/failure | Initiate DSARs; read data outside the specific task payload it was issued; access the admin UI |
+
+[^owner-abac]: Corrected 2026-08-15 (Session 10). The prior wording ("Nothing
+withheld within the instance") read as exempting Owner from
+separation-of-duties; Session 9's NFR-005 matrix confirmed that is not how
+ADR-0007's policy actually behaves — an Owner who verified identity on a DSAR
+is correctly denied when approving that same DSAR's erasure, by design (the
+control would be meaningless if the most-privileged role were exempt from
+it). See `docs/project-memory/09-decision-log.md` for the corresponding
+decision-log entry. This is a documentation correction only; no ADR was
+reopened and no policy behaviour changed.
 
 Every role's actions are logged to the audit trail (FR-014) with the ABAC
 policy ID that authorised the action (FR-013) — this is a hard requirement

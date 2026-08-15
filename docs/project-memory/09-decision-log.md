@@ -67,6 +67,17 @@ detail.
   (erasure, export approval, audit log access) this repository exists to
   gate carefully — the opposite of FR-013's intent.
 
+## Documentation correction — Owner row, `02-requirements.md` (Session 10, 2026-08-15)
+- **Finding:** Session 9's NFR-005 matrix found `02-requirements.md`'s Owner
+  row ("Nothing withheld within the instance") read as exempting Owner from
+  separation-of-duties. That is not how ADR-0007 behaves in code — an Owner
+  who verified identity on a DSAR is correctly denied when approving that
+  DSAR's own erasure, by design.
+- **Resolution:** wording corrected to state Owner is subject to the same
+  system-wide integrity controls (see the Owner row's footnote). ADR-0007
+  itself was **not** reopened or changed — the code was right, the
+  documentation was stale.
+
 ## ADR-0005 — Single-Organisation Data Model (No Tenant Column)
 - **Date:** 2026-08-11 · **Status:** accepted · [Full ADR](../adr/ADR-0005-single-organisation-data-model.md)
 - **Decision:** no tenant/org column anywhere in the schema; a
