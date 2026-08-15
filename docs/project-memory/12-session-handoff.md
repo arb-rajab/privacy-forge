@@ -61,7 +61,7 @@ accounting:
   producing deletion certificates — wired against the real
   `consent_records`/`dsar_requests` tables the rest of the app already
   uses, not a synthetic fixture.
-- Status: **complete, not yet pushed** — 134/134 tests passing for real
+- Status: **complete and pushed to `origin/main`** — 134/134 tests passing for real
   against live PostgreSQL + Redis (24 new this session), `composer lint`
   (Pint) clean, `composer analyse` (Larastan level 8) clean, all 4 new
   migrations confirmed migrate → rollback → migrate clean,
@@ -305,8 +305,9 @@ file.
 - `docs/architecture/openapi.yaml` validated with `python -m
   openapi_spec_validator` (containerised, same tool CI uses) → **OK**.
 - No `.env.example` or config changes this session.
-- **Not yet pushed to `origin/main`** — confirm with the user before
-  pushing.
+- Pushed to `origin/main` as a single commit after confirming all of the
+  above passed for real (the user was asked, and chose to commit and
+  push immediately).
 
 ## Open questions and risks
 
@@ -336,8 +337,7 @@ file.
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
 **Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 11
-complete, **not yet pushed to `origin/main`** — confirm with the user
-before pushing.
+complete and **pushed to `origin/main`**.
 
 **Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL,
 Redis, S3-compatible storage. No stack changes this session.
@@ -391,5 +391,4 @@ FR-016) — see "Next recommended session" above.
 - `docs/project-memory/04-data-model.md` (CONSENT_PURPOSE/RETENTION_POLICY)
 
 **Ground rules:** Do not change the stack. Do not reopen any existing ADR.
-`R-01`/`R-02` remain open — do not fold a fix in silently. Confirm with
-the user before pushing this session's work to `origin/main`.
+`R-01`/`R-02` remain open — do not fold a fix in silently.
