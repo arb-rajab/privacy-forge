@@ -16,7 +16,7 @@
   certificate readiness, and — the priority half — a real, gated, tested
   `policy.update` sensitive action, closing `R-03` for good rather than
   just re-logging it.
-- Status: **complete and validated locally, not yet pushed** — 110/110
+- Status: **complete and pushed to `origin/main`** — 110/110
   tests passing for real against live PostgreSQL + Redis (21 new this
   session), `composer lint` (Pint) clean, `composer analyse` (Larastan
   level 8) clean, `docs/architecture/openapi.yaml` re-validated with the
@@ -245,9 +245,9 @@ schema; new schemas `PolicyDefinition`, `PolicyDefinitionUpdateRequest`,
   gate checks for; not fixed, to avoid unrelated scope creep across
   pre-existing schemas.)
 - No `.env.example`, config, or migration changes this session.
-- Not yet pushed to `origin/main` — pending user confirmation per this
-  session's ground rules ("commit and push only after confirming tests
-  genuinely pass").
+- Pushed to `origin/main` as two commits (docs corrections, then the
+  admin-dashboard/policy.update feature work) after confirming all of the
+  above passed for real.
 
 ## Open questions and risks
 
@@ -282,7 +282,7 @@ schema; new schemas `PolicyDefinition`, `PolicyDefinitionUpdateRequest`,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
 **Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 10
-complete locally, **not yet pushed** as of this handoff.
+complete and **pushed to `origin/main`**.
 
 **Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL,
 Redis, S3-compatible storage. No stack changes this session.
