@@ -43,4 +43,18 @@ class PolicyDefinitionFactory extends Factory
             ],
         ]);
     }
+
+    // ADR-0006 — the policy.update sensitive action itself, Owner-only per
+    // that ADR's own wording ("restricted to the Owner role"), unlike
+    // dsar.erasure.approve above which also admits privacy_manager.
+    public function forPolicyUpdate(): static
+    {
+        return $this->state(fn () => [
+            'action_name' => 'policy.update',
+            'subject_conditions' => [
+                'role' => ['in' => ['owner']],
+            ],
+            'resource_conditions' => [],
+        ]);
+    }
 }

@@ -23,6 +23,15 @@ tags:
     description: Public data-subject request submission and status (FR-005..011)
   - name: Admin — Purposes and Policies
     description: Staff-only consent purpose, notice, and retention policy management
+  - name: Admin — DSAR Queue
+    description: >
+      Staff-only DSAR visibility, including per-connector task status
+      (Session 10 — closes the gap Session 8 left: this was previously
+      visible only via direct DB access)
+  - name: Admin — ABAC Policies
+    description: >
+      Staff-only ABAC policy definition management — the policy.update
+      sensitive action (ADR-0006), Owner-only (Session 10, closes R-03)
   - name: Admin — RoPA and Audit
     description: Staff-only compliance evidence exports (FR-014, FR-016)
   - name: Connector Callback
@@ -268,6 +277,95 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /admin/dsar:
+    get:
+      tags: [Admin — DSAR Queue]
+      summary: >
+        List DSARs with their current status and per-connector task
+        status (Session 10). Not an ADR-0001 sensitive action — every
+        staff role, including Support Staff, "can view DSAR status" per
+        the roles matrix — so this is gated by session auth alone, not
+        PolicyEvaluator.
+      security: [{ staffAuth: [] }]
+      responses:
+        '200':
+          description: DSAR queue, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DsarQueueItem' }
+
+  /admin/policies:
+    get:
+      tags: [Admin — ABAC Policies]
+      summary: >
+        List ABAC policy definitions. Gated by the policy.update policy
+        (ADR-0006) — viewing and editing share one gate, since ADR-0006
+        names exactly one sensitive action for this surface.
+      security: [{ staffAuth: [] }]
+      responses:
+        '200':
+          description: All policy definitions (active and superseded)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PolicyDefinition' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+
+  /admin/policies/{policyId}:
+    get:
+      tags: [Admin — ABAC Policies]
+      summary: View a single ABAC policy definition
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The policy definition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyDefinition' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Admin — ABAC Policies]
+      summary: >
+        Update a policy definition (FR-013, ADR-0006). Policies are
+        versioned rows (04-data-model.md): this supersedes the current
+        row and creates the next version rather than mutating in place —
+        the same pattern already used for consent notices.
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyDefinitionUpdateRequest' }
+      responses:
+        '200':
+          description: Superseded — the new version is returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyDefinition' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /admin/retention-policies/{policyId}/dry-run:
     post:
       tags: [Admin — Purposes and Policies]
@@ -466,6 +564,20 @@ components:
         status:
           type: string
           enum: [pending_verification, in_progress, partially_complete, complete, rejected]
+        export_bundles:
+          type: array
+          description: >
+            Session 10 — how a data subject learns their export is ready,
+            via the same status link they already hold. Empty until at
+            least one unexpired bundle exists (US-008).
+          items: { $ref: '#/components/schemas/ExportBundle' }
+        deletion_certificate:
+          description: >
+            Session 10 — how a data subject learns their erasure is
+            complete (US-009). Null until issued.
+          oneOf:
+            - { $ref: '#/components/schemas/DeletionCertificateSummary' }
+            - type: 'null'
 
     ExportBundle:
       type: object
@@ -473,6 +585,69 @@ components:
         format: { type: string, enum: [json, csv] }
         download_url: { type: string, format: uri }
         expires_at: { type: string, format: date-time }
+
+    DeletionCertificateSummary:
+      type: object
+      properties:
+        issued_at: { type: string, format: date-time }
+        summary: { type: string }
+        exceptions:
+          type: string
+          nullable: true
+          description: >
+            Null when every connector confirmed erasure; otherwise names
+            which connector(s) could not confirm (FR-011 — never
+            overstate what was achieved).
+
+    DsarQueueItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        request_type: { type: string, enum: [access, export, erasure] }
+        status:
+          type: string
+          enum: [pending_verification, in_progress, partially_complete, complete, rejected]
+        identity_verified_by: { type: string, format: uuid, nullable: true }
+        identity_verified_at: { type: string, format: date-time, nullable: true }
+        erasure_approved_by: { type: string, format: uuid, nullable: true }
+        erasure_approved_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/DsarConnectorTaskStatus' }
+
+    DsarConnectorTaskStatus:
+      type: object
+      properties:
+        connector_id: { type: string, format: uuid }
+        connector_name: { type: string }
+        task_type: { type: string, enum: [export, erasure] }
+        status: { type: string, enum: [pending, success, failed, partial] }
+        attempt_count: { type: integer }
+        failure_reason: { type: string, nullable: true }
+        dispatched_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+
+    PolicyDefinition:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        action_name: { type: string }
+        version: { type: integer }
+        subject_conditions: { type: object, additionalProperties: true }
+        resource_conditions: { type: object, additionalProperties: true }
+        environment_conditions: { type: object, additionalProperties: true }
+        effect: { type: string, enum: [allow, deny] }
+        status: { type: string, enum: [active, superseded] }
+
+    PolicyDefinitionUpdateRequest:
+      type: object
+      required: [effect]
+      properties:
+        subject_conditions: { type: object, additionalProperties: true, nullable: true }
+        resource_conditions: { type: object, additionalProperties: true, nullable: true }
+        environment_conditions: { type: object, additionalProperties: true, nullable: true }
+        effect: { type: string, enum: [allow, deny] }
 
     RetentionPreview:
       type: object

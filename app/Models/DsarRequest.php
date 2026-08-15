@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 // US-005/US-006. subject_identifier is encrypted at rest (Laravel's
 // `encrypted` cast, keyed on APP_KEY) rather than one-way hashed like
@@ -59,6 +61,30 @@ class DsarRequest extends Model
     public function erasureApprover(): BelongsTo
     {
         return $this->belongsTo(User::class, 'erasure_approved_by');
+    }
+
+    /**
+     * @return HasMany<DsarConnectorTask, $this>
+     */
+    public function connectorTasks(): HasMany
+    {
+        return $this->hasMany(DsarConnectorTask::class);
+    }
+
+    /**
+     * @return HasMany<ExportBundle, $this>
+     */
+    public function exportBundles(): HasMany
+    {
+        return $this->hasMany(ExportBundle::class);
+    }
+
+    /**
+     * @return HasOne<DeletionCertificate, $this>
+     */
+    public function deletionCertificate(): HasOne
+    {
+        return $this->hasOne(DeletionCertificate::class);
     }
 
     // Same HMAC-over-APP_KEY approach as ConsentRecord::hashIdentifier —

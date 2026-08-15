@@ -16,31 +16,40 @@ use App\Models\User;
 // ADR-0001's Option C names the intended sensitive-action registry:
 // DSAR identity verification, DSAR export approval, DSAR erasure
 // approval, retention policy execution, and audit log access. ADR-0006
-// adds a sixth: policy.update. As of this session, reading the actual
+// adds a sixth: policy.update. Reading the actual
 // `PolicyEvaluator::evaluate()` call sites in app/Http/Controllers is the
 // only reliable source of truth for what is *actually* registered and
-// gated — and there are exactly two:
+// gated. As of Session 10, there are exactly three:
 //   - dsar.identity.verify  (App\Http\Controllers\Admin\DsarController::verifyIdentity)
 //   - dsar.erasure.approve  (App\Http\Controllers\Admin\DsarController::approveErasure)
+//   - policy.update         (App\Http\Controllers\Admin\PolicyController::index/show/update)
 // "DSAR export approval" was never built as a separate gate — Session 8
 // wired export/access dispatch to fire at identity-verification time
 // instead (see DsarController::verifyIdentity's comment), so it is not a
 // distinct action to test; it is already covered by the
-// dsar.identity.verify rows below. Retention execution, audit log
-// access, and policy.update have no controller, no route, and no
-// PolicyDefinition action_name in use anywhere in the codebase — they are
-// **not applicable yet**, not silently omitted; see the "Not-yet-built
-// sensitive actions" section below for why, one row each.
+// dsar.identity.verify rows below. Retention execution and audit log
+// access still have no controller, route, or PolicyDefinition
+// action_name in use anywhere in the codebase — **not applicable yet**,
+// not silently omitted; see the "Not-yet-built sensitive actions" section
+// below for why, one row each.
 //
-// This means the registered-action count is 2, not the 4 assumed when
-// this session was scoped (which also expected a connector-management
-// action from Session 8). Session 8 added connector *registration* only
-// as an artisan console command (RegisterReferenceConnectorCommand) with
-// no HTTP route and no PolicyEvaluator call — it is an ops/CLI action,
-// not a staff ABAC action, so it does not belong in this matrix at all.
-// This discrepancy against this session's own brief is flagged here
-// and in docs/project-memory/12-session-handoff.md, not silently
-// resolved by inventing a fourth registered action that doesn't exist.
+// policy.update (Session 10, closing R-03 —
+// docs/project-memory/10-risk-register.md): PolicyController exposes
+// index/show/update, all three gated by the same policy.update
+// PolicyEvaluator call (ADR-0006 names exactly one action for this
+// surface, so viewing and editing share it rather than splitting into a
+// role-checked "view" and an ABAC-gated "edit"). The dataset below tests
+// PATCH (the literal "update") as the representative endpoint; index/show
+// sharing the same gate is covered instead in
+// tests/Feature/PolicyManagementTest.php, per the same
+// cross-reference-rather-than-duplicate approach used for cross-field and
+// fail-closed cases (see below). Session 8's connector work added only an
+// artisan console command (RegisterReferenceConnectorCommand) — no HTTP
+// route, no PolicyEvaluator call — an ops/CLI action, not a staff ABAC
+// action, so it still does not belong in this matrix. Session 10
+// evaluated adding an HTTP connector-management endpoint and decided
+// against it (see docs/project-memory/12-session-handoff.md) — connector
+// management remains CLI-only, so this remains correct, not a gap.
 //
 // Roles tested: Owner, Privacy Manager, Support Staff (all real `users`
 // rows — the `role` column is a 3-value DB enum, confirmed by reading
@@ -61,27 +70,17 @@ use App\Models\User;
 // here. Session 7 already built and passes them against the real
 // endpoints in tests/Feature/DsarErasureApprovalTest.php ("separation of
 // duties: the same user who verified identity cannot also approve
-// erasure..." / "...a different verifier and approver succeeds..."). This
-// matrix's coverage table (docs/project-memory/07-testing-strategy.md)
-// lists those two cells as delegated to that file by name, per the
-// "cross-reference rather than duplicate, but say so plainly" instruction
-// — it does not re-run the same HTTP calls under a different test name.
-// This session used the exercise of building this matrix to discover that
-// the existing separation-of-duties coverage only exercises the
-// privacy_manager role; an Owner self-approval case was genuinely
-// missing and has been added this session directly to
-// DsarErasureApprovalTest.php (not here), because it belongs beside its
-// sibling separation-of-duties tests. See that file and the coverage
-// report for why this surfaced a documentation finding, not a code bug:
-// 02-requirements.md's Owner row says "Nothing withheld within the
-// instance", but ADR-0007's policy row (role in [owner, privacy_manager])
-// applies separation-of-duties to Owner too, by deliberate design — this
-// is a stale-wording tension in the requirements doc, not a bug to fix by
-// weakening the policy (which would reopen ADR-0007).
+// erasure..." / "...an Owner..." / "...a different verifier and approver
+// succeeds..."). This matrix's coverage table
+// (docs/project-memory/07-testing-strategy.md) lists those cells as
+// delegated to that file by name, per the "cross-reference rather than
+// duplicate, but say so plainly" instruction — it does not re-run the
+// same HTTP calls under a different test name.
 //
-// Fail-closed fault injection (ADR-0006): already covered for BOTH
-// registered actions in tests/Feature/DsarIdentityVerificationTest.php
-// and tests/Feature/DsarErasureApprovalTest.php (policy_missing and
+// Fail-closed fault injection (ADR-0006): covered for all three
+// registered actions in tests/Feature/DsarIdentityVerificationTest.php,
+// tests/Feature/DsarErasureApprovalTest.php, and
+// tests/Feature/PolicyManagementTest.php (policy_missing and
 // evaluation_error reason codes, for each action). Not reimplemented
 // here — see the coverage report for the delegation.
 
@@ -98,17 +97,30 @@ dataset('nfr005_role_action_matrix', [
     'Support Staff × dsar.erasure.approve → deny' => ['support_staff', 'dsar.erasure.approve', 'deny'],
     'Data Subject × dsar.erasure.approve → deny (unauthenticated)' => ['data_subject', 'dsar.erasure.approve', 'deny'],
     'Connector × dsar.erasure.approve → deny (unauthenticated)' => ['connector', 'dsar.erasure.approve', 'deny'],
+
+    'Owner × policy.update → allow' => ['owner', 'policy.update', 'allow'],
+    'Privacy Manager × policy.update → deny' => ['privacy_manager', 'policy.update', 'deny'],
+    'Support Staff × policy.update → deny' => ['support_staff', 'policy.update', 'deny'],
+    'Data Subject × policy.update → deny (unauthenticated)' => ['data_subject', 'policy.update', 'deny'],
+    'Connector × policy.update → deny (unauthenticated)' => ['connector', 'policy.update', 'deny'],
 ]);
 
 test('(role × sensitive action) matrix cell matches the documented permissions matrix', function (string $roleLabel, string $action, string $expected) {
     PolicyDefinition::factory()->create(); // dsar.identity.verify, v1, active
     PolicyDefinition::factory()->forErasureApproval()->create(); // dsar.erasure.approve, v1, active
+    PolicyDefinition::factory()->forPolicyUpdate()->create(); // policy.update, v1, active
 
     // A distinct "someone else" verifier so dsar.erasure.approve's own
     // separation-of-duties condition never fires as a side effect of
     // *this* matrix — that cross-field case is deliberately separate
     // (see file header) and is asserted for real elsewhere.
     $otherVerifier = User::factory()->privacyManager()->create();
+
+    // policy.update's own matrix cell targets an unrelated policy row,
+    // never the policy.update gate row created above — so a PATCH under
+    // test never supersedes the very policy this test relies on for its
+    // own gating.
+    $targetPolicy = PolicyDefinition::factory()->create(['action_name' => 'some.other.action']);
 
     $dsar = match ($action) {
         'dsar.identity.verify' => DsarRequest::factory()->create([
@@ -120,11 +132,15 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
             'identity_verified_by' => $otherVerifier->id,
             'identity_verified_at' => now(),
         ]),
+        'policy.update' => null,
     };
+
+    $resourceId = $action === 'policy.update' ? $targetPolicy->id : $dsar->id;
 
     $endpoint = match ($action) {
         'dsar.identity.verify' => "/api/v1/admin/dsar/{$dsar->id}/verify-identity",
         'dsar.erasure.approve' => "/api/v1/admin/dsar/{$dsar->id}/approve-erasure",
+        'policy.update' => "/api/v1/admin/policies/{$targetPolicy->id}",
     };
 
     $actor = match ($roleLabel) {
@@ -140,16 +156,19 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         'data_subject', 'connector' => null,
     };
 
-    $response = $actor === null
-        ? $this->postJson($endpoint)
-        : $this->actingAs($actor)->postJson($endpoint);
+    $response = match (true) {
+        $action === 'policy.update' && $actor === null => $this->patchJson($endpoint, ['effect' => 'allow']),
+        $action === 'policy.update' => $this->actingAs($actor)->patchJson($endpoint, ['effect' => 'allow']),
+        $actor === null => $this->postJson($endpoint),
+        default => $this->actingAs($actor)->postJson($endpoint),
+    };
 
     if ($expected === 'allow') {
         $response->assertStatus(200);
 
         $entry = AuditLogEntry::query()
             ->where('action', $action)
-            ->where('resource_id', $dsar->id)
+            ->where('resource_id', $resourceId)
             ->first();
 
         expect($entry)->not->toBeNull();
@@ -164,7 +183,7 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
 
     $entry = AuditLogEntry::query()
         ->where('action', $action)
-        ->where('resource_id', $dsar->id)
+        ->where('resource_id', $resourceId)
         ->first();
 
     if (in_array($roleLabel, ['data_subject', 'connector'], true)) {
@@ -179,9 +198,9 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
     }
 })->with('nfr005_role_action_matrix');
 
-// Not-yet-built sensitive actions (ADR-0001/ADR-0006 name them; none has a
-// controller, route, or PolicyDefinition action_name in the codebase as of
-// this session). Asserted here, not just noted in prose, so a future
+// Not-yet-built sensitive actions (ADR-0001 names them; neither has a
+// controller, route, or PolicyDefinition action_name in the codebase as
+// of this session). Asserted here, not just noted in prose, so a future
 // session that adds one of these routes has a failing test to update
 // rather than a silently-stale comment: each assertion below documents
 // exactly what "not applicable yet" is standing in for, and will need to
@@ -193,8 +212,4 @@ test('retention policy execution has no registered action yet — not applicable
 
 test('audit log access has no registered action yet — not applicable to this matrix (no endpoint gates it)', function () {
     expect(PolicyDefinition::query()->where('action_name', 'like', 'audit_log.%')->exists())->toBeFalse();
-});
-
-test('policy.update has no registered action yet — not applicable to this matrix (ADR-0006 names it, R-02 tracks the gap)', function () {
-    expect(PolicyDefinition::query()->where('action_name', 'policy.update')->exists())->toBeFalse();
 });

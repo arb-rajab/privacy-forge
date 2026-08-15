@@ -20,6 +20,8 @@
 use App\Http\Controllers\Admin\ConsentNoticeController;
 use App\Http\Controllers\Admin\ConsentPurposeController;
 use App\Http\Controllers\Admin\DsarController as AdminDsarController;
+use App\Http\Controllers\Admin\DsarQueueController;
+use App\Http\Controllers\Admin\PolicyController;
 use App\Http\Controllers\ConnectorCallbackController;
 use App\Http\Controllers\ConsentController;
 use App\Http\Controllers\DsarController;
@@ -51,5 +53,19 @@ Route::prefix('v1')->group(function () {
         Route::post('/consent-purposes/{purposeId}/notices', [ConsentNoticeController::class, 'store']);
         Route::post('/dsar/{dsarId}/verify-identity', [AdminDsarController::class, 'verifyIdentity']);
         Route::post('/dsar/{dsarId}/approve-erasure', [AdminDsarController::class, 'approveErasure']);
+
+        // DSAR queue visibility (Session 10) — read-only, available to any
+        // staff session per the roles matrix (Support Staff "can view DSAR
+        // status"; not an ADR-0001 sensitive action, so no PolicyEvaluator
+        // gate, matching the plain-auth pattern already used above for
+        // consent-purpose management.
+        Route::get('/dsar', [DsarQueueController::class, 'index']);
+
+        // policy.update (ADR-0006, R-03 — closed this session). Every
+        // route below is gated by the same PolicyEvaluator call inside
+        // PolicyController, Owner-only.
+        Route::get('/policies', [PolicyController::class, 'index']);
+        Route::get('/policies/{policyId}', [PolicyController::class, 'show']);
+        Route::patch('/policies/{policyId}', [PolicyController::class, 'update']);
     });
 });

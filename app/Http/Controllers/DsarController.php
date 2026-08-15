@@ -77,7 +77,10 @@ class DsarController extends Controller
             ], 410);
         }
 
-        $dsar = DsarRequest::query()->where('status_token', $signedToken)->firstOrFail();
+        $dsar = DsarRequest::query()
+            ->where('status_token', $signedToken)
+            ->with(['exportBundles', 'deletionCertificate'])
+            ->firstOrFail();
 
         return new DsarStatusResource($dsar);
     }
