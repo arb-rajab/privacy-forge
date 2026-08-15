@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-11
+> Last updated: 2026-08-14
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -41,6 +41,19 @@ detail.
 - **Must not be silently reversed because:** FR-009's "independently
   tracked, partial-failure-visible" requirement is not satisfiable with a
   synchronous design without reintroducing head-of-line blocking.
+
+## ADR-0007 — Cross-Field Comparison Operator in Policy Conditions
+- **Date:** 2026-08-14 · **Status:** accepted · [Full ADR](../adr/ADR-0007-policy-condition-cross-field-comparison.md)
+- **Decision:** extend `PolicyEvaluator`'s condition matcher with a general
+  `not_equals_attribute` operator (a `"bag.attribute"` reference resolved
+  against subject/resource/environment) rather than special-casing
+  separation-of-duties as controller code. Separation-of-duties
+  (`dsar.erasure.approve`) is an ordinary policy row like every other rule.
+- **Must not be silently reversed because:** ADR-0001 already specified
+  separation-of-duties as a policy condition, not application code, so it
+  shows up in the same policy registry, audit trail, and exhaustive test
+  suite as every other rule. Special-casing it in the controller instead
+  would quietly reverse that decision.
 
 ## ADR-0006 — Fail-Closed Default for the PolicyEvaluator
 - **Date:** 2026-08-12 · **Status:** accepted · [Full ADR](../adr/ADR-0006-policy-evaluator-fail-closed.md)

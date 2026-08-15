@@ -14,9 +14,9 @@ use Illuminate\Support\Facades\Schema;
 // unguessable value used exclusively by the public status-check link
 // (T-05, 06-security-threat-model.md) — the row's own uuid `id` is never
 // exposed to an unauthenticated caller. erasure_approved_by/at columns
-// are part of the authoritative DSAR_REQUEST schema but are not
-// populated by any endpoint this session — erasure approval is deferred,
-// see docs/project-memory/12-session-handoff.md.
+// are part of the authoritative DSAR_REQUEST schema; populated by
+// Admin\DsarController::approveErasure once erasure approval existed
+// (Session 7/6c) — see docs/project-memory/12-session-handoff.md.
 return new class extends Migration
 {
     public function up(): void

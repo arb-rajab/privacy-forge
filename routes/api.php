@@ -40,5 +40,6 @@ Route::prefix('v1')->group(function () {
         Route::delete('/consent-purposes/{purposeId}', [ConsentPurposeController::class, 'destroy']);
         Route::post('/consent-purposes/{purposeId}/notices', [ConsentNoticeController::class, 'store']);
         Route::post('/dsar/{dsarId}/verify-identity', [AdminDsarController::class, 'verifyIdentity']);
+        Route::post('/dsar/{dsarId}/approve-erasure', [AdminDsarController::class, 'approveErasure']);
     });
 });

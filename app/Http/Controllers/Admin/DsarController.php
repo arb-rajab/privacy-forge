@@ -54,4 +54,57 @@ class DsarController extends Controller
 
         return new DsarStatusResource($dsar);
     }
+
+    // US-006's remaining half. Gated by the dsar.erasure.approve policy
+    // (ADR-0001), whose resource_conditions require status=in_progress
+    // (FR-007/US-006 AC2 — no verification, no approval) and whose
+    // subject_conditions require the approver's id to differ from the
+    // DSAR's identity_verified_by (separation-of-duties, ADR-0007). Both
+    // gates are policy data, not controller code — see ADR-0007.
+    public function approveErasure(Request $request, string $dsarId): DsarStatusResource|JsonResponse
+    {
+        $dsar = DsarRequest::query()->findOrFail($dsarId);
+
+        $actor = $request->user();
+        if (! $actor instanceof User) {
+            abort(401);
+        }
+
+        $decision = $this->policyEvaluator->evaluate(
+            action: 'dsar.erasure.approve',
+            actor: $actor,
+            resourceType: 'dsar_request',
+            resourceId: $dsar->id,
+            resourceAttributes: [
+                'status' => $dsar->status,
+                'request_type' => $dsar->request_type,
+                'identity_verified_by' => $dsar->identity_verified_by,
+            ],
+        );
+
+        if (! $decision->allowed) {
+            return response()->json([
+                'type' => 'about:blank',
+                'title' => 'Denied by ABAC policy evaluation',
+                'status' => 403,
+                'detail' => 'The dsar.erasure.approve policy denied this request.',
+                'policy_id' => $decision->policyId,
+            ], 403);
+        }
+
+        // Connector task dispatch (ADR-0004) is out of scope this session
+        // (see docs/project-memory/12-session-handoff.md) — recording the
+        // approval is the hook a future session dispatches from
+        // (erasure_approved_at IS NOT NULL). Status stays in_progress:
+        // there is no "dispatching" status value yet, and in_progress
+        // already means "work ongoing, not yet complete."
+        if ($dsar->erasure_approved_by === null) {
+            $dsar->forceFill([
+                'erasure_approved_by' => $actor->id,
+                'erasure_approved_at' => now(),
+            ])->save();
+        }
+
+        return new DsarStatusResource($dsar);
+    }
 }

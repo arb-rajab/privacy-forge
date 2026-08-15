@@ -62,12 +62,14 @@ Purpose and notice *creation* endpoints (`POST /admin/consent-purposes`,
 the plan described here. Retention-policy creation remains undesigned
 until the retention slice is implemented.
 
-`POST /dsar`, `GET /dsar/status/{signedToken}`, and `POST
-/admin/dsar/{dsarId}/verify-identity` were already present in the Session 3
-draft spec and are implemented as specified at Session 6b — no contract
-changes were needed for these three. `POST /admin/dsar/{dsarId}/approve-erasure`
-remains specified but unimplemented (erasure approval doesn't exist yet;
-see `12-session-handoff.md`).
+`POST /dsar`, `GET /dsar/status/{signedToken}`, `POST
+/admin/dsar/{dsarId}/verify-identity`, and `POST
+/admin/dsar/{dsarId}/approve-erasure` were all present in the Session 3
+draft spec and are implemented as specified — no contract changes were
+needed for any of the four. Erasure approval (Session 7/6c) is gated by
+the `dsar.erasure.approve` policy, whose separation-of-duties and
+verified-before-approved conditions rely on a new `not_equals_attribute`
+condition operator (ADR-0007) — see `12-session-handoff.md`.
 
 ## Error model
 

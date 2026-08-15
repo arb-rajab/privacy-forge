@@ -14,12 +14,11 @@ use Illuminate\Support\Facades\DB;
 // the first test of ADR-0006's fail-closed guarantee against something
 // real rather than a stub.
 //
-// NOT covered here, deliberately (see docs/project-memory/12-session-handoff.md):
-// - The separation-of-duties acceptance criterion (verifier != approver)
-//   — erasure approval doesn't exist yet, so only half the pair exists.
-// - US-006 AC2 ("any export or erasure task is attempted... refuses and
-//   logs the refusal") — task execution (US-007) doesn't exist yet
-//   either, so there is no code path to attempt.
+// Separation-of-duties (verifier != approver) and US-006 AC2 (no
+// export/erasure task before verification) were deliberately NOT covered
+// here — erasure approval didn't exist yet, so only half the pair existed.
+// Both are now covered in tests/Feature/DsarErasureApprovalTest.php,
+// against the real dsar.erasure.approve endpoint (see ADR-0007).
 
 test('a privacy manager can verify identity, moving the DSAR to in_progress and logging the allow decision with a policy id', function () {
     $policy = PolicyDefinition::factory()->create();

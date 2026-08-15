@@ -42,9 +42,18 @@ class PolicyEvaluator
 
             $subjectAttributes = ['role' => $actor->role, 'id' => $actor->id];
 
-            $conditionsMet = $this->matchesConditions($policy->subject_conditions, $subjectAttributes)
-                && $this->matchesConditions($policy->resource_conditions, $resourceAttributes)
-                && $this->matchesConditions($policy->environment_conditions, $environmentAttributes);
+            // Passed to every matchesConditions() call so a condition on
+            // one bag (e.g. subject) can reference an attribute on another
+            // (e.g. resource) via the "*_attribute" operators — ADR-0007.
+            $attributeBags = [
+                'subject' => $subjectAttributes,
+                'resource' => $resourceAttributes,
+                'environment' => $environmentAttributes,
+            ];
+
+            $conditionsMet = $this->matchesConditions($policy->subject_conditions, $subjectAttributes, $attributeBags)
+                && $this->matchesConditions($policy->resource_conditions, $resourceAttributes, $attributeBags)
+                && $this->matchesConditions($policy->environment_conditions, $environmentAttributes, $attributeBags);
 
             $allowed = $conditionsMet && $policy->effect === 'allow';
             $reasonCode = $allowed ? null : 'policy_conditions_not_met';
@@ -95,8 +104,9 @@ class PolicyEvaluator
     /**
      * @param  array<string, mixed>|null  $conditions
      * @param  array<string, mixed>  $attributes
+     * @param  array<string, array<string, mixed>>  $attributeBags
      */
-    private function matchesConditions(?array $conditions, array $attributes): bool
+    private function matchesConditions(?array $conditions, array $attributes, array $attributeBags): bool
     {
         foreach ($conditions ?? [] as $attribute => $spec) {
             if (! is_array($spec)) {
@@ -119,8 +129,43 @@ class PolicyEvaluator
             if (array_key_exists('equals', $spec) && $value !== $spec['equals']) {
                 return false;
             }
+
+            if (array_key_exists('not_equals_attribute', $spec)
+                && ! $this->attributeDiffersFromReference($value, $spec['not_equals_attribute'], $attributeBags)) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /**
+     * Resolves a "bag.attribute" reference (e.g. "resource.identity_verified_by")
+     * against $attributeBags and reports whether $value differs from it —
+     * the cross-field comparison operator ADR-0007 adds for rules like
+     * separation-of-duties, which compare two attributes of the request
+     * to each other rather than one attribute against a fixed constant.
+     * A missing or unresolvable reference is treated as "does not differ"
+     * (denies) rather than vacuously true, per ADR-0006's fail-closed
+     * default — an unresolvable comparison is exactly the kind of
+     * ambiguity that must not silently allow.
+     *
+     * @param  array<string, array<string, mixed>>  $attributeBags
+     */
+    private function attributeDiffersFromReference(mixed $value, mixed $reference, array $attributeBags): bool
+    {
+        if (! is_string($reference) || ! str_contains($reference, '.')) {
+            throw new UnexpectedValueException('Malformed "not_equals_attribute" reference: expected a "bag.attribute" string.');
+        }
+
+        [$bag, $referenceAttribute] = explode('.', $reference, 2);
+
+        if (! array_key_exists($bag, $attributeBags)) {
+            throw new UnexpectedValueException("Malformed \"not_equals_attribute\" reference: unknown attribute bag \"{$bag}\".");
+        }
+
+        $referenceValue = $attributeBags[$bag][$referenceAttribute] ?? null;
+
+        return $referenceValue !== null && $value !== null && $value !== $referenceValue;
     }
 }
