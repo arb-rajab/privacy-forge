@@ -122,6 +122,45 @@ test('separation of duties: the same user who verified identity cannot also appr
     expect($entry->reason_code)->toBe('policy_conditions_not_met');
 });
 
+test('separation of duties: an Owner who verified identity also cannot approve erasure on that DSAR themselves (NFR-005 gap found and closed this session)', function () {
+    // The existing pair of separation-of-duties tests above only ever
+    // exercise the privacy_manager role. ADR-0007's actual policy row
+    // applies `not_equals_attribute` to `role: {in: [owner,
+    // privacy_manager]}` — i.e. by design, Owner is not exempt from this
+    // control. 02-requirements.md's Owner row ("Nothing withheld within
+    // the instance") reads as if it should be exempt; that wording
+    // predates ADR-0007 (2026-08-10 vs 2026-08-14) and was never updated
+    // to reflect it. This is flagged as a documentation-currency finding
+    // in docs/project-memory/12-session-handoff.md — not fixed by
+    // weakening the policy, which would reopen ADR-0007's decision.
+    PolicyDefinition::factory()->create(); // dsar.identity.verify
+    PolicyDefinition::factory()->forErasureApproval()->create();
+    $owner = User::factory()->owner()->create();
+    $dsar = DsarRequest::factory()->create(['request_type' => 'erasure']);
+
+    $this->actingAs($owner)->postJson("/api/v1/admin/dsar/{$dsar->id}/verify-identity")
+        ->assertStatus(200);
+
+    $dsar->refresh();
+    expect($dsar->identity_verified_by)->toBe($owner->id);
+
+    $response = $this->actingAs($owner)->postJson("/api/v1/admin/dsar/{$dsar->id}/approve-erasure");
+
+    $response->assertStatus(403);
+
+    $dsar->refresh();
+    expect($dsar->erasure_approved_by)->toBeNull();
+
+    $entry = AuditLogEntry::query()
+        ->where('action', 'dsar.erasure.approve')
+        ->where('resource_id', $dsar->id)
+        ->first();
+
+    expect($entry)->not->toBeNull();
+    expect($entry->decision)->toBe('deny');
+    expect($entry->reason_code)->toBe('policy_conditions_not_met');
+});
+
 test('separation of duties: a different verifier and approver succeeds, proving the rule discriminates rather than always denying', function () {
     PolicyDefinition::factory()->create(); // dsar.identity.verify
     PolicyDefinition::factory()->forErasureApproval()->create();
