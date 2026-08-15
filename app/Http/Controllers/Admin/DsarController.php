@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\DsarStatusResource;
 use App\Models\DsarRequest;
 use App\Models\User;
+use App\Services\DsarDispatcher;
 use App\Services\PolicyEvaluator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,10 @@ use Illuminate\Http\Request;
 // aren't enough for a sensitive action (no policy_id to log).
 class DsarController extends Controller
 {
-    public function __construct(private readonly PolicyEvaluator $policyEvaluator) {}
+    public function __construct(
+        private readonly PolicyEvaluator $policyEvaluator,
+        private readonly DsarDispatcher $dispatcher,
+    ) {}
 
     public function verifyIdentity(Request $request, string $dsarId): DsarStatusResource|JsonResponse
     {
@@ -50,6 +54,13 @@ class DsarController extends Controller
                 'identity_verified_by' => $actor->id,
                 'identity_verified_at' => now(),
             ])->save();
+
+            // US-007/ADR-0004: export/access requests have no separate
+            // approval gate (unlike erasure — see approveErasure below),
+            // so identity verification is the action that dispatches them.
+            if ($dsar->request_type !== 'erasure') {
+                $this->dispatcher->dispatch($dsar, 'export');
+            }
         }
 
         return new DsarStatusResource($dsar);
@@ -92,17 +103,18 @@ class DsarController extends Controller
             ], 403);
         }
 
-        // Connector task dispatch (ADR-0004) is out of scope this session
-        // (see docs/project-memory/12-session-handoff.md) — recording the
-        // approval is the hook a future session dispatches from
-        // (erasure_approved_at IS NOT NULL). Status stays in_progress:
-        // there is no "dispatching" status value yet, and in_progress
-        // already means "work ongoing, not yet complete."
+        // US-007/ADR-0004: erasure approval is the dispatch trigger for
+        // erasure tasks (export/access dispatch earlier, at verification —
+        // see verifyIdentity above). Status stays in_progress here;
+        // DsarCompletionEvaluator moves it to complete/partially_complete
+        // once every dispatched task reaches a terminal state.
         if ($dsar->erasure_approved_by === null) {
             $dsar->forceFill([
                 'erasure_approved_by' => $actor->id,
                 'erasure_approved_at' => now(),
             ])->save();
+
+            $this->dispatcher->dispatch($dsar, 'erasure');
         }
 
         return new DsarStatusResource($dsar);

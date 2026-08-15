@@ -20,8 +20,10 @@
 use App\Http\Controllers\Admin\ConsentNoticeController;
 use App\Http\Controllers\Admin\ConsentPurposeController;
 use App\Http\Controllers\Admin\DsarController as AdminDsarController;
+use App\Http\Controllers\ConnectorCallbackController;
 use App\Http\Controllers\ConsentController;
 use App\Http\Controllers\DsarController;
+use App\Http\Controllers\ExportBundleController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -34,6 +36,14 @@ Route::prefix('v1')->group(function () {
     // (URL::temporarySignedRoute) — the only route in this file that
     // needs a name for that reason.
     Route::get('/dsar/status/{signedToken}', [DsarController::class, 'status'])->name('dsar.status');
+    Route::get('/dsar/export/{signedToken}/download', [ExportBundleController::class, 'download'])->name('dsar.export.download');
+    Route::get('/dsar/export-bundle/{bundleId}/raw', [ExportBundleController::class, 'raw'])->name('dsar.export.raw');
+
+    // Connector Callback tag (ADR-0004) — connector-authenticated via
+    // X-Connector-Signature, a separate credential space from staff
+    // sessions (connectorAuth in openapi.yaml), so this deliberately sits
+    // outside the ['web', 'auth'] admin group below.
+    Route::post('/connector-callback/{taskId}', [ConnectorCallbackController::class, 'handle']);
 
     Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
         Route::post('/consent-purposes', [ConsentPurposeController::class, 'store']);

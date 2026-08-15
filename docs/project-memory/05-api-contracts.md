@@ -71,6 +71,13 @@ the `dsar.erasure.approve` policy, whose separation-of-duties and
 verified-before-approved conditions rely on a new `not_equals_attribute`
 condition operator (ADR-0007) — see `12-session-handoff.md`.
 
+`GET /dsar/export/{signedToken}/download` and `POST
+/connector-callback/{taskId}` are implemented at Session 8, as specified
+— `{signedToken}` is `EXPORT_BUNDLE.download_token` (T-05: unguessable,
+never the row's own uuid), and the outbound/inbound webhook contracts
+described below are implemented field-for-field as documented, including
+`subject_identifier` and `schema_version` in the outbound payload.
+
 ## Error model
 
 **RFC 9457 Problem Details** (`application/json`, `type`/`title`/`status`/
