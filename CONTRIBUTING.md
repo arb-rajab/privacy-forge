@@ -65,6 +65,7 @@ doesn't, `docker compose logs app` is the first place to look.
 
 ```bash
 docker compose exec app composer test      # Pest
+docker compose exec app composer test:e2e  # Pest Browser Testing (consent widget + DSAR portal, tests/Browser/)
 docker compose exec app composer lint      # Pint (add --fix to auto-fix)
 docker compose exec app composer analyse   # Larastan / PHPStan, level 8
 docker compose exec frontend npm run lint

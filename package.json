@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build",
+        "build": "vite build && vite build --config vite.widget.config.js",
+        "build:widget": "vite build --config vite.widget.config.js",
         "lint": "eslint resources/js --ext .js,.vue",
         "lint:fix": "eslint resources/js --ext .js,.vue --fix",
         "test": "vitest run"
@@ -17,6 +18,7 @@
         "eslint": "^8.57.0",
         "eslint-plugin-vue": "^9.26.0",
         "laravel-vite-plugin": "^1.0.0",
+        "playwright": "^1.62.1",
         "postcss": "^8.4.38",
         "tailwindcss": "^3.4.0",
         "vite": "^5.2.0",

@@ -11,11 +11,13 @@ defineProps({
   <div style="font-family: system-ui; padding: 2rem;">
     <h1>privacy-forge</h1>
     <p>{{ status }}</p>
-    <p>
-      If you can read this rendered by Vue via Inertia, the environment
-      baseline (Session 5) is working: Laravel is serving requests, Vite
-      built the frontend assets, and Inertia is passing props from the
-      backend to a Vue component.
-    </p>
+    <ul>
+      <li><a href="/dsar">Submit a data-subject request</a></li>
+      <li>
+        <a href="/embed-example.html">Consent widget embed example</a>
+        — a plain third-party page demonstrating the embeddable widget
+        (see README for how to embed it on your own site)
+      </li>
+    </ul>
   </div>
 </template>

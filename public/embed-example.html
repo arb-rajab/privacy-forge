@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Acme Corp — Newsletter Signup (third-party embed example)</title>
+</head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto;">
+  <!--
+    This file is deliberately plain HTML with zero framework, zero Blade,
+    zero Inertia — it is not served by any privacy-forge page controller,
+    just a static asset in public/. That is the point: it stands in for a
+    third-party site embedding the consent widget, proving the widget
+    works outside this application's own admin/Inertia shell, not just
+    inside it. purposeId is read from the query string since a static
+    file can't receive server-rendered props.
+  -->
+  <h1>Acme Corp — Newsletter Signup</h1>
+  <p>Enter your email below to subscribe. Acme Corp uses privacy-forge to
+  record your consent.</p>
+
+  <div id="pf-consent-widget"></div>
+
+  <script src="/widget.js"></script>
+  <script>
+    const purposeId = new URLSearchParams(window.location.search).get('purposeId')
+    window.PrivacyForgeConsentWidget.mount('#pf-consent-widget', {
+      apiBase: '/api/v1',
+      purposeId: purposeId || '',
+    })
+  </script>
+</body>
+</html>

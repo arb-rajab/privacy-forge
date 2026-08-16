@@ -236,6 +236,129 @@ detail.
   require` completed with no dependency conflicts and no new security
   advisories.
 
+## Embeddable consent widget: a standalone Vite library build, not an Inertia page (Session 13, 2026-08-18)
+`01-scope-and-non-goals.md`'s MVP checklist named this the last
+undelivered half of item 1 ("capture API + embeddable widget"). The
+existing `resources/js/app.js` pipeline (laravel-vite-plugin, Blade
+`@vite()` directive, content-hashed manifest-keyed assets) only produces
+assets a page *this application* renders — a third-party site embedding
+the widget has no Blade template and no manifest, so it needs one
+stable URL it can hardcode in a `<script src>` tag. Solved with a second,
+independent Vite config (`vite.widget.config.js`) building
+`resources/js/widget/main.js` in library mode (IIFE, fixed filename,
+`emptyOutDir: false`) straight to `public/widget.js`, alongside the
+existing pipeline rather than replacing it. `npm run build` runs both.
+Proven genuinely embeddable, not just built that way: `public/
+embed-example.html` is a plain static HTML file with zero Blade/Inertia
+involvement, and `tests/Browser/DsarLifecycleTest.php` drives it as a
+real browser would.
+
+## DSAR status page: a UI shell that forwards the existing signed link, not a new endpoint (Session 13, 2026-08-18)
+The brief for this session was explicit that the DSAR portal UI must
+call the contracts already in `docs/architecture/openapi.yaml` — no new
+endpoints. `GET /api/v1/dsar/status/{signedToken}` returns JSON and its
+signature is a hash over that exact path plus query string (Laravel's
+`hasValidSignature()`); a page at a different path could not reuse the
+same signature. Rather than add a second signing scheme or move the
+JSON route, `routes/web.php`'s `/dsar/status/{signedToken}` is a plain
+Inertia shell that takes no position on the query string's validity at
+all — `DsarStatus.vue` reads `window.location.search` and calls
+`fetch('/api/v1/dsar/status/'+signedToken+search)` client-side, i.e. the
+literal, unmodified signed URL `DsarController::submit` already mints.
+An invalid or expired signature still resolves correctly (a 410 from the
+real endpoint, shown as "expired"); nothing about the underlying contract
+or its signing changed.
+
+## Pest Browser Testing (`pestphp/pest-plugin-browser`) added for the Success-Metric-1 E2E test (Session 13, 2026-08-18)
+The brief asked for a genuine end-to-end proof of the consent →
+withdrawal → DSAR → export/erasure cycle, not just "the pages render",
+and named Playwright or Dusk/Pest-browser-testing as the candidates,
+noting neither was yet in the stack. Chosen: `pestphp/pest-plugin-browser`
+(`^4.3`), not raw Playwright or Dusk, because its `LaravelHttpServer`
+driver dispatches every browser-originated request through the *same*
+in-process application instance the rest of a Pest test runs in (see its
+source, `vendor/pestphp/pest-plugin-browser/src/Drivers/
+LaravelHttpServer.php`) — including `test()->prepareCookiesForRequest()`,
+which carries a plain `$this->actingAs($user)` session into the browser
+automatically. That mattered concretely this session: there is no staff
+login UI (see the finding below), so the admin verify/approve steps in
+the test are ordinary `actingAs()->postJson()` calls, and only the
+public-facing steps go through the real browser — both share the same
+`RefreshDatabase` transaction because they're the same process. Raw
+Playwright or Dusk would have needed a real, separately-authenticated
+HTTP session for that bridge, which doesn't exist yet to authenticate
+against. This is tooling, not a new architectural pattern — does not
+count against the 2-new-technology cap (ABAC, ASVS L2).
+
+Despite being pure-PHP for CDP orchestration, the plugin still launches a
+real Chromium via a locally installed `playwright` npm package —
+`ext-sockets` and Node.js/npm were added to `docker/Dockerfile` (the dev
+image only; `12-session-handoff.md`/`03-architecture.md` still describe
+this as separate from Session 8's hardened production image) for this
+reason alone. `composer.json`'s `test:e2e` script (`pest tests/Browser`)
+runs only that directory, bypassing `phpunit.xml.dist`'s registered
+testsuites entirely — `composer test`/the existing `php-quality` CI job
+are completely unaffected; a new dedicated `e2e` CI job runs it with
+Node available.
+
+## Two real bugs found and fixed while getting the E2E test running (Session 13, 2026-08-18)
+Both found by actually running the test repeatedly against a real browser,
+not by inspection — worth recording precisely because they're exactly the
+kind of environment-specific failure a "the pages render" check would
+have missed entirely.
+
+1. **`pestphp/pest-plugin-browser`'s own cleanup code crashes without
+   `ext-pcntl`.** `PlaywrightNpmServer::stop()` references the bare
+   `SIGTERM` constant unconditionally on non-Windows
+   (`vendor/pestphp/pest-plugin-browser/src/Playwright/Servers/
+   PlaywrightNpmServer.php:99`), which is only defined when the `pcntl`
+   extension is loaded. Without it: every test run's actual assertions
+   pass, then the process exits non-zero anyway because teardown throws
+   `Undefined constant "...SIGTERM"` — a false failure signal that would
+   have made this look broken even though it wasn't. Fixed by adding
+   `pcntl` to `docker/Dockerfile`'s `docker-php-ext-install` line and to
+   the `e2e` CI job's `shivammathur/setup-php` extensions list. Not a
+   project design decision, just a missing runtime dependency of a tool
+   this session added — recorded so a future session doesn't waste time
+   rediscovering it.
+2. **The widget silently failed to mount in a real browser: "process is
+   not defined."** `vite.widget.config.js` builds in Vite's library mode
+   (needed for a single fixed-filename IIFE — see the decision above).
+   Library mode skips Vite's usual app-build default of replacing
+   `process.env.NODE_ENV`, which Vue's bundler-targeted build checks at
+   runtime; without it, real Chromium throws a `ReferenceError` importing
+   Vue, before `resources/js/widget/main.js` ever reaches the line that
+   sets `window.PrivacyForgeConsentWidget` — so the widget's own HTML
+   shell still rendered (nothing about the *page* failed), but the
+   mounted form never appeared. This is exactly why the DoD asked for a
+   real browser test rather than "the pages render": a smoke test that
+   only checked for static surrounding text on the page passed while the
+   actual widget was dead. Fixed by adding `define: {'process.env.NODE_ENV':
+   JSON.stringify('production')}` to `vite.widget.config.js` — as a
+   side effect, this also let Rollup tree-shake Vue's dev-only warning
+   code, shrinking `public/widget.js` from ~105 KB to ~69 KB.
+
+## Finding: no staff login mechanism exists anywhere in this application (Session 13, 2026-08-18)
+Discovered while designing the E2E test's admin verify/approve step, not
+assumed. `05-api-contracts.md` documents `staffAuth` as session-based
+(`web` guard), and every admin-gated controller correctly checks
+`$request->user()` — but no controller, route, or view anywhere calls
+`Auth::login()` or renders a login form. The *only* place a session is
+ever established for a staff user is Pest's `actingAs()` test helper,
+which has no HTTP-reachable equivalent. Concretely: today, a real
+browser, with real credentials, cannot become an authenticated staff
+session at all — every admin JSON endpoint is unreachable to a human
+except via a workaround that bypasses the browser (see the README's
+step 3, which calls the gated controllers directly via `tinker` rather
+than pretending a login flow exists). This is a materially different,
+and more fundamental, gap than "richer admin dashboard" in `11-backlog.md`
+— that phrasing implies a dashboard is merely undecorated; this means no
+staff identity can be established over HTTP at all. Not fixed this
+session (out of scope — building a login system is a new feature, not
+part of "consent widget + DSAR portal UI"); flagged here and in
+`12-session-handoff.md` rather than left for a future session to
+rediscover the way Session 11 had to check Session 8's TTL-testing claim.
+
 ## ADR-0005 — Single-Organisation Data Model (No Tenant Column)
 - **Date:** 2026-08-11 · **Status:** accepted · [Full ADR](../adr/ADR-0005-single-organisation-data-model.md)
 - **Decision:** no tenant/org column anywhere in the schema; a

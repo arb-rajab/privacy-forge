@@ -15,13 +15,14 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.9",
         "laravel/pint": "^1.13",
         "laravel/sail": "^1.26",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.0",
         "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-browser": "^4.3",
         "pestphp/pest-plugin-laravel": "^4.0",
-        "larastan/larastan": "^3.9",
         "spatie/laravel-ignition": "^2.4"
     },
     "autoload": {
@@ -53,7 +54,8 @@
         "lint": "pint --test",
         "lint:fix": "pint",
         "analyse": "phpstan analyse --memory-limit=1G",
-        "test": "pest"
+        "test": "pest",
+        "test:e2e": "pest tests/Browser"
     },
     "extra": {
         "laravel": {
@@ -64,6 +66,7 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,
+        "process-timeout": 900,
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true

@@ -7,6 +7,24 @@
 ## Levels
 | Level | Tool | Scope | Gate |
 |---|---|---|---|
+
+## End-to-end / browser testing (Session 13, 2026-08-18)
+
+`tests/Browser/DsarLifecycleTest.php`, via `pestphp/pest-plugin-browser`
+(`composer test:e2e`, a dedicated CI job — see `09-decision-log.md` for
+why this tool over raw Playwright/Dusk). This is the direct test of
+Success Metric #1 in `00-project-brief.md`: a real headless browser
+gives consent through the embeddable widget on a plain static page
+(`public/embed-example.html`, not this app's own Inertia shell),
+submits an erasure DSAR through the public portal, and — after the
+admin verify/approve steps (`actingAs()`, since no staff login UI
+exists yet) and a simulated real connector callback — reloads the same
+bookmarked status page and sees completion, then withdraws consent on
+the original widget page. Not a smoke test asserting pages render; it
+asserts the actual data-level outcomes (`ConsentRecord.status`,
+`DsarRequest.status`, `DeletionCertificate` existence) alongside what's
+visible in the browser.
+
 ## Security testing
 
 ### NFR-005 — exhaustive (role × sensitive-action) authorisation coverage

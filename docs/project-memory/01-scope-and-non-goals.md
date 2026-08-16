@@ -1,34 +1,41 @@
 # Scope and Non-Goals
 > Purpose: prevent scope creep by writing down what this will never do.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-17
+> Last updated: 2026-08-18
 
 ## MVP boundary (in scope)
 
-**Checked item-by-item against the actual codebase, Session 12
-(2026-08-17)** — not re-asserted from memory. Backend/API + test coverage
-is complete for five of nine items; the remaining four have a real,
-specific gap named inline rather than left as a vague "mostly done".
+**Checked item-by-item against the actual codebase, Session 13
+(2026-08-18)** — not re-asserted from memory. 7 of 9 items are now
+genuinely complete; the remaining two are independent, narrower gaps
+(the audit-log anchor job; the demo instance/seeders) rather than the
+single shared "no frontend" root cause Session 12 found.
 
-- [ ] Consent registry: purposes, lawful bases, versioned consent notices,
-      capture API + embeddable widget, withdrawal. **Backend complete**
-      (US-001–004: purposes, lawful bases, versioned notices, capture API,
-      withdrawal all implemented and tested). **Not done: the embeddable
-      widget itself.** `resources/js/` contains only the default Inertia
-      scaffold (`Pages/Welcome.vue`) — no widget component exists anywhere
-      in the repository as of this session.
-- [ ] Data-subject requests (DSAR): intake portal, identity-verification
+- [x] Consent registry: purposes, lawful bases, versioned consent notices,
+      capture API + embeddable widget, withdrawal. **Complete.** US-001–004
+      backend unchanged; the embeddable widget (`resources/js/widget/`,
+      built standalone to `public/widget.js` via `vite.widget.config.js`)
+      is new this session and proven genuinely embeddable on a third-party
+      page — `public/embed-example.html` is a plain static HTML file with
+      no Blade/Inertia involvement, driven by a real headless browser in
+      `tests/Browser/DsarLifecycleTest.php`. Withdrawal is part of the
+      widget (immediate, same-page-view only — see `09-decision-log.md`
+      for why it deliberately does not persist consent state client-side).
+- [x] Data-subject requests (DSAR): intake portal, identity-verification
       stub, task orchestration across registered "data source" connectors,
       export bundle (JSON + CSV) delivered via a short-TTL signed URL,
-      erasure with a verification receipt. **Backend complete** (US-005–009:
-      submission API, identity-verification stub, connector task
-      orchestration, export bundle assembly + signed download, erasure +
-      deletion certificate all implemented and tested). **Not done: the
-      public-facing intake portal itself** — `POST /dsar` and the signed
-      status/download endpoints exist and are fully tested at the API
-      level, but there is no actual page a data subject visits (same gap
-      as the consent widget above: no frontend beyond the Inertia
-      scaffold).
+      erasure with a verification receipt. **Complete.** US-005–009 backend
+      unchanged; the public intake portal (`/dsar`, `/dsar/status/
+      {signedToken}`, `resources/js/Pages/DsarSubmit.vue`/`DsarStatus.vue`)
+      is new this session, calling the unchanged `POST /dsar`/`GET /dsar/
+      status/{signedToken}` contracts — see `09-decision-log.md` for how
+      the status page reuses the exact signed link rather than inventing a
+      new endpoint. Identity verification and erasure approval still have
+      no staff-facing UI (see the new finding in `09-decision-log.md`: no
+      staff login mechanism exists anywhere yet), but the DSAR-portal half
+      this item's own wording asks for is real and browser-tested end to
+      end, including a completed erasure with its deletion certificate
+      surfaced back to the data subject.
 - [x] Retention policies: per-data-category rules, dry-run preview,
       scheduled execution, deletion certificates. Complete (Session 11:
       US-010/011/012; Session 12 fixed a real re-selection bug in
@@ -76,12 +83,13 @@ specific gap named inline rather than left as a vague "mostly done".
       Session 8 TTL-testing claim was checked and clarified at Session 11.
 
 This list is the literal checklist for "MVP complete" — see the Definition
-below. **As of Session 12: 5 of 9 items are genuinely complete; the other
-4 share one root cause (no frontend beyond the default Inertia scaffold —
-consent widget, DSAR portal) plus two independent, narrower gaps (the
-audit-log anchor job; the demo instance/seeders). The project cannot yet
-be credibly called MVP-complete per its own Definition below, specifically
-condition 1 ("every box... checked and demonstrably working end-to-end").**
+below. **As of Session 13: 7 of 9 items are genuinely complete; the
+remaining 2 are independent, narrower gaps (the audit-log anchor job,
+R-04; the demo instance/seeders, R-02) — the "no frontend" root cause
+Session 12 found is closed. The project is closer to MVP-complete than
+at any prior session, but cannot yet be credibly called MVP-complete per
+its own Definition below, specifically condition 1 ("every box...
+checked and demonstrably working end-to-end").**
 
 ## Explicit non-goals
 

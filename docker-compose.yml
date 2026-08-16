@@ -19,6 +19,11 @@ services:
     volumes:
       - .:/var/www/html
       - /var/www/html/vendor
+      # Same shadowing problem the vendor volume above solves, for the
+      # image's npm-installed playwright + downloaded Chromium (see
+      # docker/Dockerfile) — without this, the host bind mount's
+      # node_modules-less checkout would hide the image's own install.
+      - /var/www/html/node_modules
     environment:
       - DB_HOST=postgres
       - REDIS_HOST=redis

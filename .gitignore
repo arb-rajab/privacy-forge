@@ -14,6 +14,7 @@
 # Build artifacts
 /public/build
 /public/hot
+/public/widget.js
 /storage/*.key
 /storage/logs/*
 !/storage/logs/.gitkeep

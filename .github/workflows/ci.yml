@@ -91,6 +91,86 @@ jobs:
           DB_PASSWORD: privacy_forge_ci
           REDIS_HOST: 127.0.0.1
 
+  e2e:
+    name: End-to-end (consent widget + DSAR portal, Pest Browser Testing)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: privacy_forge_test
+          POSTGRES_USER: privacy_forge
+          POSTGRES_PASSWORD: privacy_forge_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U privacy_forge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo, pdo_pgsql, redis, zip, sockets, pcntl
+          coverage: none
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend assets (main app + widget)
+        run: npm run build
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Run migrations (test database)
+        run: php artisan migrate --force
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: privacy_forge_test
+          DB_PASSWORD: privacy_forge_ci
+
+      - name: Run end-to-end tests (Pest Browser Testing)
+        run: composer test:e2e
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: privacy_forge_test
+          DB_PASSWORD: privacy_forge_ci
+          REDIS_HOST: 127.0.0.1
+
   js-quality:
     name: Frontend lint and build
     runs-on: ubuntu-latest

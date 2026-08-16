@@ -13,7 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
         libpq-dev \
         libzip-dev \
-    && docker-php-ext-install pdo pdo_pgsql zip \
+        curl \
+        ca-certificates \
+        gnupg \
+    && docker-php-ext-install pdo pdo_pgsql zip sockets pcntl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -41,6 +46,17 @@ RUN composer install --no-interaction --no-scripts --no-progress
 COPY . .
 
 RUN composer install --no-interaction --no-progress
+
+# Pest's Browser Testing plugin (pestphp/pest-plugin-browser, added this
+# session for the consent-widget/DSAR-portal E2E test — see
+# tests/Browser/) is pure-PHP for CDP orchestration but still launches a
+# real Chromium via a locally installed `playwright` npm package
+# (Node.js), hence Node here despite this otherwise being a PHP-only
+# image. `--with-deps` pulls the OS-level libraries a real headless
+# Chromium needs on Debian, matching Playwright's own documented
+# install step.
+RUN npm ci --no-audit --no-fund \
+    && npx playwright install --with-deps chromium
 
 EXPOSE 8000
 
