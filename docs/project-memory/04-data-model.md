@@ -1,7 +1,7 @@
 # Data Model
 > Purpose: the authoritative description of stored data.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-11
+> Last updated: 2026-08-17
 
 ## ERD
 
@@ -40,6 +40,8 @@ erDiagram
         enum status "active | deprecated"
         uuid current_notice_id FK
         int version
+        uuid data_category_id FK "nullable, Session 12"
+        text data_subjects_description "nullable, Session 12"
     }
 
     CONSENT_NOTICE {
@@ -159,6 +161,7 @@ erDiagram
 
     CONSENT_PURPOSE ||--o{ CONSENT_NOTICE : "has versions"
     CONSENT_PURPOSE ||--o{ CONSENT_RECORD : "recorded against"
+    DATA_CATEGORY |o--o{ CONSENT_PURPOSE : "classifies (nullable, Session 12)"
     CONSENT_NOTICE ||--o{ CONSENT_RECORD : "shown at time of"
     DSAR_REQUEST ||--o{ DSAR_CONNECTOR_TASK : "dispatches"
     CONNECTOR ||--o{ DSAR_CONNECTOR_TASK : "receives"
@@ -179,7 +182,7 @@ erDiagram
 | `ORGANISATION_SETTINGS` | The single-row settings record for this instance (per ADR-0005) | name, DPO contact, jurisdiction | Organisational metadata — not personal data |
 | `STAFF_USER` | Internal operator accounts | role (owner/privacy_manager/support_staff) | Personal data (employee) |
 | `DATA_CATEGORY` | Classifies what kind of data a retention policy governs | sensitivity level | Organisational metadata. Implemented at Session 11 (US-010) — the first implementation of an entity that had been ERD-only since Session 3. `subject_table` extends the ERD's listed columns: a closed enum (`consent_records`\|`dsar_requests`) naming which of this instance's own tables a governing `RetentionPolicy` actually queries — `App\Services\RetentionSelector` switches on it, and it is the only place that mapping is allowed to live. Deliberately excludes `audit_log_entries`/`deletion_certificates` by construction (the enum has no value for either), not by a runtime check — see the Retention and deletion rules section below. |
-| `CONSENT_PURPOSE` | A named reason for processing, with its lawful basis | lawful_basis, version | Organisational metadata |
+| `CONSENT_PURPOSE` | A named reason for processing, with its lawful basis | lawful_basis, version | Organisational metadata. `data_category_id`/`data_subjects_description` added at Session 12 (US-013/FR-016) — both nullable, both RoPA-only content: the first links a purpose to the `DATA_CATEGORY` whose retention policy governs its consent records (the join `App\Services\RopaGenerator` uses to derive a purpose's retention period; the ERD never linked these two entities before, since `DATA_CATEGORY` previously existed only as `RETENTION_POLICY`'s governing category), the second is free text for Art. 30(1)(c)'s "categories of data subjects," which had no existing home anywhere in the schema. |
 | `CONSENT_NOTICE` | Immutable, versioned wording shown to a data subject | version, body, published_at | Organisational metadata (the wording itself is not personal data; a specific consent record referencing it is) |
 | `CONSENT_RECORD` | Evidence that a specific subject consented (or withdrew) to a specific notice version | subject_identifier_hash, status | Personal data |
 | `CONNECTOR` | A registered external system that can fulfil export/erasure tasks | webhook_url, secret_hash | Organisational/infrastructure metadata. Implemented at Session 8 (ADR-0004). `secret_hash` — despite the ERD's name — is stored via Laravel's `encrypted` cast (reversible), not a one-way hash: the application must recompute the exact HMAC-SHA256 the connector computes, on both the outbound webhook and the inbound callback, which a true one-way hash would make impossible on either side. Only the reference/stub connector (FR-019) is registered in v1, via a `connectors:register-reference` artisan command — no registration admin UI exists yet. |
@@ -191,6 +194,12 @@ erDiagram
 | `RETENTION_EXECUTION` | A single dry-run or real run of a policy | mode, affected_record_count | Evidentiary record. Implemented at Session 11 (US-011/US-012, ADR-0002, `App\Services\RetentionExecutor`). A dry run is not "free" (per the ADR's own consequences): it produces this row too (`mode: dry_run`, `certificate_id` stays null), just as a real run produces both this row (`mode: real`) and a `DELETION_CERTIFICATE`. Scheduled real execution (`App\Console\Commands\ExecuteRetentionPoliciesCommand`, registered daily in `routes/console.php`) processes every currently-`active` `RetentionPolicy` each run — deliberately not gated by `PolicyEvaluator` itself; see the Retention and deletion rules section below for why that is a documented decision, not a gap. |
 | `POLICY_DEFINITION` | An ABAC policy row (ADR-0001) | action_name, conditions (JSON), effect | Organisational/security metadata. Implemented at Session 6b, evaluated by `App\Services\PolicyEvaluator`. `dsar.identity.verify` (Session 6b) and `dsar.erasure.approve` (Session 7/6c) are registered; the remaining sensitive actions ADR-0001 names (retention execution, audit log access) are not yet registered since their endpoints don't exist yet. `dsar.erasure.approve`'s conditions use a new `not_equals_attribute` operator (ADR-0007) to compare the approving actor's id against the DSAR's `identity_verified_by`, and an `in` resource condition on `status`/`request_type` to enforce verified-before-approved. No seeding/bootstrap mechanism exists yet for either row — see `12-session-handoff.md` (`R-02`). |
 | `AUDIT_LOG_ENTRY` | Hash-chained, tamper-evident record of every sensitive action (ADR-0003) | policy_id, decision, prev_hash, entry_hash | Evidentiary record; may reference personal data indirectly. `actor_type: data_subject` added at Session 6a for unauthenticated public consent actions (capture/withdraw) — the original three values had no category for an actor who is neither staff, a connector, nor the system itself. |
+
+**No `ROPA_RECORD` entity, by design (Session 12, US-013/FR-016):** the
+RoPA export is generated on demand from `CONSENT_PURPOSE` (+ the
+`DATA_CATEGORY`/`RETENTION_POLICY` join added this session) by
+`App\Services\RopaGenerator` — never its own stored row. See
+`09-decision-log.md` ("RoPA generated on demand, not stored") for why.
 
 **Demo seed data note:** every entity above, when populated in the public
 demo instance, is generated synthetically (per FR-018/NFR-010). No table has
@@ -268,8 +277,22 @@ of each other later.
   from ever being a retention-policy target — `DATA_CATEGORY.subject_table`
   simply has no enum value for either table — consistent with both being
   retained indefinitely by design (below) and with the Backup and
-  Recovery distinction in `03-architecture.md` that this session's work
+  Recovery distinction in `03-architecture.md` that Session 11's work
   was instructed not to touch.
+- **`RetentionSelector` also excludes already-anonymised rows (Session 12
+  bug fix; see `09-decision-log.md`):** a row `RetentionExecutor::apply()`
+  already anonymised keeps its `status`/`withdrawn_at`/`created_at`
+  unchanged by design (anonymise, unlike erase, keeps the row for
+  aggregate value) — without an explicit exclusion, every subsequent
+  scheduled run re-selected and re-certified it. `RetentionSelector::query()`
+  now also filters out any row whose `subject_identifier_hash` already
+  carries the `'anonymised-'` marker both anonymise() methods write.
+- **DSAR-driven erasure (US-009) never touches these two tables at all**
+  (Session 12 finding, not a bug — see `09-decision-log.md`): erasure is
+  dispatched exclusively to external connectors over the ADR-0004 webhook
+  contract, which never mutate this application's own `consent_records`/
+  `dsar_requests` rows. `RetentionExecutor` remains the only code path
+  that erases/anonymises either table's content.
 - Scheduled real execution (`App\Console\Commands\ExecuteRetentionPoliciesCommand`,
   US-012) is deliberately **not** gated by `PolicyEvaluator`, unlike every
   `retention.policy.manage`-gated HTTP endpoint (data-category/retention-

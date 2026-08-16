@@ -16,16 +16,17 @@ use App\Models\User;
 // ADR-0001's Option C names the intended sensitive-action registry:
 // DSAR identity verification, DSAR export approval, DSAR erasure
 // approval, retention policy execution, and audit log access. ADR-0006
-// adds policy.update; Session 11 adds retention.policy.manage. Reading
-// the actual `PolicyEvaluator::evaluate()` call sites in
-// app/Http/Controllers is the only reliable source of truth for what is
-// *actually* registered and gated. As of Session 11, there are exactly
-// four:
+// adds policy.update; Session 11 adds retention.policy.manage; Session 12
+// adds ropa.export. Reading the actual `PolicyEvaluator::evaluate()` call
+// sites in app/Http/Controllers is the only reliable source of truth for
+// what is *actually* registered and gated. As of Session 12, there are
+// exactly five:
 //   - dsar.identity.verify       (App\Http\Controllers\Admin\DsarController::verifyIdentity)
 //   - dsar.erasure.approve       (App\Http\Controllers\Admin\DsarController::approveErasure)
 //   - policy.update              (App\Http\Controllers\Admin\PolicyController::index/show/update)
 //   - retention.policy.manage    (App\Http\Controllers\Admin\DataCategoryController::index/store,
 //                                  App\Http\Controllers\Admin\RetentionPolicyController::index/show/store/update/dryRun)
+//   - ropa.export                (App\Http\Controllers\Admin\RopaController::export)
 // "DSAR export approval" was never built as a separate gate — Session 8
 // wired export/access dispatch to fire at identity-verification time
 // instead (see DsarController::verifyIdentity's comment), so it is not a
@@ -64,6 +65,16 @@ use App\Models\User;
 // (creation) as the representative endpoint, since it has no dependent
 // resource to set up first; the remaining four endpoints are covered in
 // tests/Feature/RetentionPolicyManagementTest.php, per the same
+// cross-reference-rather-than-duplicate approach used elsewhere in this
+// file.
+//
+// ropa.export (Session 12, US-013/FR-016): a single GET endpoint —
+// App\Http\Controllers\Admin\RopaController::export — gated the same
+// Owner-or-Privacy-Manager shape as retention.policy.manage (the roles
+// matrix names RoPA viewing as Privacy Manager's work and explicitly bars
+// Support Staff from it). Tested here with ?format=csv, the lighter of
+// the two formats — PDF rendering is covered for real in
+// tests/Feature/RopaExportTest.php, per the same
 // cross-reference-rather-than-duplicate approach used elsewhere in this
 // file.
 //
@@ -125,6 +136,12 @@ dataset('nfr005_role_action_matrix', [
     'Support Staff × retention.policy.manage → deny' => ['support_staff', 'retention.policy.manage', 'deny'],
     'Data Subject × retention.policy.manage → deny (unauthenticated)' => ['data_subject', 'retention.policy.manage', 'deny'],
     'Connector × retention.policy.manage → deny (unauthenticated)' => ['connector', 'retention.policy.manage', 'deny'],
+
+    'Owner × ropa.export → allow' => ['owner', 'ropa.export', 'allow'],
+    'Privacy Manager × ropa.export → allow' => ['privacy_manager', 'ropa.export', 'allow'],
+    'Support Staff × ropa.export → deny' => ['support_staff', 'ropa.export', 'deny'],
+    'Data Subject × ropa.export → deny (unauthenticated)' => ['data_subject', 'ropa.export', 'deny'],
+    'Connector × ropa.export → deny (unauthenticated)' => ['connector', 'ropa.export', 'deny'],
 ]);
 
 test('(role × sensitive action) matrix cell matches the documented permissions matrix', function (string $roleLabel, string $action, string $expected) {
@@ -132,6 +149,7 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
     PolicyDefinition::factory()->forErasureApproval()->create(); // dsar.erasure.approve, v1, active
     PolicyDefinition::factory()->forPolicyUpdate()->create(); // policy.update, v1, active
     PolicyDefinition::factory()->forRetentionPolicyManage()->create(); // retention.policy.manage, v1, active
+    PolicyDefinition::factory()->forRopaExport()->create(); // ropa.export, v1, active
 
     // A distinct "someone else" verifier so dsar.erasure.approve's own
     // separation-of-duties condition never fires as a side effect of
@@ -155,16 +173,16 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
             'identity_verified_by' => $otherVerifier->id,
             'identity_verified_at' => now(),
         ]),
-        'policy.update', 'retention.policy.manage' => null,
+        'policy.update', 'retention.policy.manage', 'ropa.export' => null,
     };
 
     $resourceId = match ($action) {
         'policy.update' => $targetPolicy->id,
-        // DataCategoryController::store evaluates against the same
-        // nil-UUID "no single resource yet" sentinel PolicyController's
-        // index() uses — there is no DataCategory row until (and unless)
-        // the request is allowed.
-        'retention.policy.manage' => '00000000-0000-0000-0000-000000000000',
+        // DataCategoryController::store and RopaController::export both
+        // evaluate against the same nil-UUID "no single resource yet"
+        // sentinel PolicyController's index() uses — neither acts on one
+        // specific pre-existing row.
+        'retention.policy.manage', 'ropa.export' => '00000000-0000-0000-0000-000000000000',
         default => $dsar->id,
     };
 
@@ -173,6 +191,7 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         'dsar.erasure.approve' => "/api/v1/admin/dsar/{$dsar->id}/approve-erasure",
         'policy.update' => "/api/v1/admin/policies/{$targetPolicy->id}",
         'retention.policy.manage' => '/api/v1/admin/data-categories',
+        'ropa.export' => '/api/v1/admin/ropa/export?format=csv',
     };
 
     $actor = match ($roleLabel) {
@@ -195,14 +214,17 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         $action === 'policy.update' => $this->actingAs($actor)->patchJson($endpoint, ['effect' => 'allow']),
         $action === 'retention.policy.manage' && $actor === null => $this->postJson($endpoint, $retentionPayload),
         $action === 'retention.policy.manage' => $this->actingAs($actor)->postJson($endpoint, $retentionPayload),
+        $action === 'ropa.export' && $actor === null => $this->getJson($endpoint),
+        $action === 'ropa.export' => $this->actingAs($actor)->getJson($endpoint),
         $actor === null => $this->postJson($endpoint),
         default => $this->actingAs($actor)->postJson($endpoint),
     };
 
     if ($expected === 'allow') {
         // retention.policy.manage's representative endpoint is a POST
-        // that creates a new DataCategory (201) — every other action's
-        // representative endpoint acts on an existing resource (200).
+        // that creates a new DataCategory (201); every other action's
+        // representative endpoint (including ropa.export's GET) acts on an
+        // existing resource or returns a document, both 200.
         $response->assertStatus($action === 'retention.policy.manage' ? 201 : 200);
 
         $entry = AuditLogEntry::query()

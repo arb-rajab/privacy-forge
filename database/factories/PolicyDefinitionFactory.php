@@ -74,4 +74,20 @@ class PolicyDefinitionFactory extends Factory
             'resource_conditions' => [],
         ]);
     }
+
+    // Session 12 — ropa.export, the fifth registered sensitive action
+    // (US-013/FR-016). Owner or Privacy Manager, same shape as
+    // retention.policy.manage — the roles matrix names RoPA viewing as
+    // Privacy Manager's day-to-day work and explicitly bars Support Staff
+    // from it.
+    public function forRopaExport(): static
+    {
+        return $this->state(fn () => [
+            'action_name' => 'ropa.export',
+            'subject_conditions' => [
+                'role' => ['in' => ['owner', 'privacy_manager']],
+            ],
+            'resource_conditions' => [],
+        ]);
+    }
 }

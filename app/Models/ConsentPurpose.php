@@ -23,6 +23,8 @@ class ConsentPurpose extends Model
         'status',
         'current_notice_id',
         'version',
+        'data_category_id',
+        'data_subjects_description',
     ];
 
     /**
@@ -47,6 +49,17 @@ class ConsentPurpose extends Model
     public function consentRecords(): HasMany
     {
         return $this->hasMany(ConsentRecord::class, 'purpose_id');
+    }
+
+    // Session 12 (US-013/FR-016): the join RopaGenerator uses to derive a
+    // purpose's retention period — see the migration that added this
+    // column for why it didn't already exist.
+    /**
+     * @return BelongsTo<DataCategory, $this>
+     */
+    public function dataCategory(): BelongsTo
+    {
+        return $this->belongsTo(DataCategory::class);
     }
 
     public function hasActiveConsentRecords(): bool

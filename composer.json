@@ -6,11 +6,12 @@
     "license": "AGPL-3.0-or-later",
     "require": {
         "php": "^8.3",
+        "barryvdh/laravel-dompdf": "^3.1",
+        "inertiajs/inertia-laravel": "^1.0",
         "laravel/framework": "^12.61.1",
         "laravel/tinker": "^2.9",
-        "inertiajs/inertia-laravel": "^1.0",
-        "predis/predis": "^2.2",
-        "league/flysystem-aws-s3-v3": "^3.0"
+        "league/flysystem-aws-s3-v3": "^3.0",
+        "predis/predis": "^2.2"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

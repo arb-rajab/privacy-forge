@@ -1,29 +1,87 @@
 # Scope and Non-Goals
 > Purpose: prevent scope creep by writing down what this will never do.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-10
+> Last updated: 2026-08-17
 
 ## MVP boundary (in scope)
 
+**Checked item-by-item against the actual codebase, Session 12
+(2026-08-17)** — not re-asserted from memory. Backend/API + test coverage
+is complete for five of nine items; the remaining four have a real,
+specific gap named inline rather than left as a vague "mostly done".
+
 - [ ] Consent registry: purposes, lawful bases, versioned consent notices,
-      capture API + embeddable widget, withdrawal.
+      capture API + embeddable widget, withdrawal. **Backend complete**
+      (US-001–004: purposes, lawful bases, versioned notices, capture API,
+      withdrawal all implemented and tested). **Not done: the embeddable
+      widget itself.** `resources/js/` contains only the default Inertia
+      scaffold (`Pages/Welcome.vue`) — no widget component exists anywhere
+      in the repository as of this session.
 - [ ] Data-subject requests (DSAR): intake portal, identity-verification
       stub, task orchestration across registered "data source" connectors,
       export bundle (JSON + CSV) delivered via a short-TTL signed URL,
-      erasure with a verification receipt.
-- [ ] Retention policies: per-data-category rules, dry-run preview,
-      scheduled execution, deletion certificates.
-- [ ] Records of Processing Activities (RoPA) register with export.
-- [ ] Tamper-evident audit log (hash chain, periodic anchor).
-- [ ] ABAC authorisation across all of the above, with every decision logged
-      against the policy ID that produced it.
-- [ ] Single organisation per instance (no multi-tenancy).
-- [ ] GDPR/UK-GDPR regulatory frame only.
+      erasure with a verification receipt. **Backend complete** (US-005–009:
+      submission API, identity-verification stub, connector task
+      orchestration, export bundle assembly + signed download, erasure +
+      deletion certificate all implemented and tested). **Not done: the
+      public-facing intake portal itself** — `POST /dsar` and the signed
+      status/download endpoints exist and are fully tested at the API
+      level, but there is no actual page a data subject visits (same gap
+      as the consent widget above: no frontend beyond the Inertia
+      scaffold).
+- [x] Retention policies: per-data-category rules, dry-run preview,
+      scheduled execution, deletion certificates. Complete (Session 11:
+      US-010/011/012; Session 12 fixed a real re-selection bug in
+      `RetentionSelector` — see `09-decision-log.md`). This item's own
+      wording never promised a UI, only the policy/preview/execution/
+      certificate mechanism, which is real and tested end-to-end against
+      live `consent_records`/`dsar_requests` data.
+- [x] Records of Processing Activities (RoPA) register with export.
+      Complete (Session 12: US-013/FR-016 — `ropa.export`, CSV + PDF,
+      generated on demand from live purpose/category/policy data, gated
+      and tested). Same scoping note as retention: this item's wording
+      asks for "register with export," not a dashboard — v1 deliberately
+      ships an export, not a visualisation UI (see "Deferred to backlog"
+      below).
+- [ ] Tamper-evident audit log (hash chain, periodic anchor). **Hash chain
+      complete** (ADR-0003, Session 7-ish — entries are hash-chained and
+      tamper detection is tested). **Not done: the periodic external
+      anchor.** `routes/console.php`'s own comment states this plainly
+      ("The audit-log anchor... remain[s] unbuilt"); confirmed this
+      session — no anchoring job/command exists anywhere in `app/Console`
+      or `app/Services`. Entry-level tamper detection is real; the
+      stronger guarantee ADR-0003 describes (protection against a
+      sufficiently privileged attacker who edits entries *and*
+      recomputes the chain) is not yet in place.
+- [x] ABAC authorisation across all of the above, with every decision logged
+      against the policy ID that produced it. Complete — five sensitive
+      actions registered and exhaustively tested (`dsar.identity.verify`,
+      `dsar.erasure.approve`, `policy.update`, `retention.policy.manage`,
+      `ropa.export`), NFR-005's 25-cell matrix passes with zero
+      discrepancies.
+- [x] Single organisation per instance (no multi-tenancy). Complete
+      (ADR-0005 — no tenant column anywhere in the schema).
+- [x] GDPR/UK-GDPR regulatory frame only. Complete — no CCPA (or any other
+      jurisdiction's) rule path exists anywhere in the codebase.
 - [ ] A public demo instance running on synthetic seed data, in isolated
-      infrastructure, with a spend cap.
+      infrastructure, with a spend cap. **Not done.** Confirmed this
+      session: there is no `database/seeders/` directory at all in the
+      repository, and `docs/project-memory/08-deployment-and-operations.md`
+      is an entirely unwritten stub (every section header, including
+      "Backup and restore" and "Capacity and cost notes," has no content
+      under it) — despite `03-architecture.md` stating restore drills were
+      "recorded in `08-deployment-and-operations.md` (Session 8)." That
+      specific cross-reference does not hold; flagged here rather than
+      silently left for a future session to discover the same way the
+      Session 8 TTL-testing claim was checked and clarified at Session 11.
 
 This list is the literal checklist for "MVP complete" — see the Definition
-below.
+below. **As of Session 12: 5 of 9 items are genuinely complete; the other
+4 share one root cause (no frontend beyond the default Inertia scaffold —
+consent widget, DSAR portal) plus two independent, narrower gaps (the
+audit-log anchor job; the demo instance/seeders). The project cannot yet
+be credibly called MVP-complete per its own Definition below, specifically
+condition 1 ("every box... checked and demonstrably working end-to-end").**
 
 ## Explicit non-goals
 

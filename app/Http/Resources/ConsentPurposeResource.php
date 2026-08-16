@@ -23,6 +23,8 @@ class ConsentPurposeResource extends JsonResource
             'lawful_basis' => $this->lawful_basis,
             'status' => $this->status,
             'version' => $this->version,
+            'data_category_id' => $this->data_category_id,
+            'data_subjects_description' => $this->data_subjects_description,
         ];
     }
 }

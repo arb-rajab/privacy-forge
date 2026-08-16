@@ -20,6 +20,8 @@ class StoreConsentPurposeRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'lawful_basis' => ['required', 'string', 'in:consent,contract,legal_obligation,vital_interests,public_task,legitimate_interests'],
+            'data_category_id' => ['nullable', 'uuid', 'exists:data_categories,id'],
+            'data_subjects_description' => ['nullable', 'string'],
         ];
     }
 }

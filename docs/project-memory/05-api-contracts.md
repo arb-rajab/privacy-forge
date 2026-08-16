@@ -1,7 +1,7 @@
 # API / Event Contracts
 > Purpose: the interface others depend on.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-11
+> Last updated: 2026-08-17
 
 ## Style and rationale
 
@@ -77,6 +77,12 @@ condition operator (ADR-0007) — see `12-session-handoff.md`.
 never the row's own uuid), and the outbound/inbound webhook contracts
 described below are implemented field-for-field as documented, including
 `subject_identifier` and `schema_version` in the outbound payload.
+
+`GET /admin/ropa/export` is implemented at Session 12 (US-013/FR-016), as
+specified in the Session 3 draft — `format=pdf|csv`, gated by the new
+`ropa.export` sensitive action (Owner or Privacy Manager). Generated on
+demand (`App\Services\RopaGenerator`), not from a stored RoPA row — see
+`09-decision-log.md`.
 
 ## Error model
 

@@ -1,48 +1,5 @@
 # Session Handoff
 
-## Clarification carried over from Session 10 — Session 8's TTL-enforcement testing claim
-
-Session 10's handoff (superseded below by this session's own account)
-reported that the previous session "found no real minting flow existed
-until it built one" for export-bundle download links, which was in
-tension with how Session 8 described its own TTL testing. Checked
-directly against the code and git history before starting this session's
-main work, as instructed — no code change involved, just an honest
-accounting:
-
-- **What Session 8 actually tested** (`tests/Feature/ExportBundleDownloadTest.php`,
-  commit `ae42449`): the test titled "US-008 AC2 / NFR-007: an expired
-  bundle is refused at download time (410), even behind a still-validly-
-  signed URL" builds an `ExportBundle` row directly via
-  `ExportBundle::factory()->expired()->create(...)` (a manually constructed
-  row, not one produced by `ExportBundleAssembler`'s real assembly flow),
-  then calls `URL::temporarySignedRoute('dsar.export.download', ...)`
-  **directly in the test itself** to construct the signed URL. Session 8's
-  own handoff prose ("tested with a deliberately expired token behind an
-  otherwise-valid signed URL") is an accurate description of what that test
-  does.
-- **What it was not**: an end-to-end test of the application actually
-  minting that link and handing it to a data subject as part of a real
-  request flow. There was no such flow to test — Session 10 confirmed by
-  grep that nothing in the codebase ever called
-  `URL::temporarySignedRoute('dsar.export.download', ...)` outside of test
-  code itself; the only signed link the application ever gave a real data
-  subject was their DSAR *status* link. Session 10 built the missing piece
-  (`DsarStatusResource`'s `export_bundles`/`download_url` fields).
-- **Net assessment**: Session 8's test is a genuine, valid unit/feature-
-  level check of `ExportBundleController::download`'s own defence-in-depth
-  logic (the row's `signed_url_expires_at` is checked independently of the
-  outer URL signature's own expiry) — that guarantee is real and still
-  holds. It was not, and was never described as, a test of the full
-  "subject receives and uses a real link" path, because that path did not
-  exist yet. Session 8's handoff prose did not claim it was end-to-end;
-  Session 10's summary language ("tested with...") read slightly more
-  end-to-end than the underlying test actually was, which is why this
-  needed checking rather than assumed. Nothing here requires correcting
-  Session 8's or Session 10's written record — both are accurate once
-  read precisely — but future re-reads of either summary should not infer
-  "exercised via the real subject-facing flow" from either one.
-
 ## Project
 - Repository: `privacy-forge` (https://github.com/arb-rajab/privacy-forge)
 - Public or private: public (flagship)
@@ -50,345 +7,385 @@ accounting:
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 11 — Retention Policies
-  (US-010/011/012, FR-012/FR-015), implementing ADR-0002's dry-run/
-  execution parity design for real**
-- Objective: build the retention slice that has been designed since
-  Session 3 and never implemented — data category + retention policy
-  CRUD gated by a new sensitive action, the `RetentionSelector`/
-  `RetentionExecutor` services (ADR-0002's single-selection-path
-  design), the dry-run preview endpoint, and scheduled real execution
-  producing deletion certificates — wired against the real
-  `consent_records`/`dsar_requests` tables the rest of the app already
-  uses, not a synthetic fixture.
-- Status: **complete and pushed to `origin/main`** — 134/134 tests passing for real
-  against live PostgreSQL + Redis (24 new this session), `composer lint`
-  (Pint) clean, `composer analyse` (Larastan level 8) clean, all 4 new
-  migrations confirmed migrate → rollback → migrate clean,
+- Session number and title: **Session 12 — Part A: retention/DSAR
+  cross-session integration check; Part B: RoPA Export (US-013, FR-016)**
+- Objective: (A) verify whether `RetentionSelector` correctly excludes
+  data already erased via a completed DSAR before a later retention sweep
+  could re-select it, and confirm two smaller Session 11 loose ends
+  (`retention.policy.manage` in the authorisation matrix; the scheduled
+  command's registration); (B) build RoPA export (US-013/FR-016) — the
+  other remaining "Must"-priority MVP gap — as a fifth ABAC-gated sensitive
+  action, `ropa.export`, with CSV and PDF output.
+- Status: **complete, not yet pushed** — 150/150 tests passing for real
+  against live PostgreSQL + Redis (16 new this session: 3 in Part A, 13 in
+  Part B), `composer lint`/`vendor/bin/pint --test` clean, `composer
+  analyse`/`vendor/bin/phpstan analyse`(Larastan level 8) clean, the one new
+  migration confirmed migrate → rollback → migrate clean,
   `docs/architecture/openapi.yaml` re-validated with the same
-  `openapi_spec_validator` tool the CI `openapi-validate` job uses.
+  `openapi_spec_validator` tool CI uses (run in a throwaway `python:3.12-slim`
+  container, since neither the app container nor the host machine has
+  Python installed — noted here in case a future session hits the same
+  surprise).
 
-## Part 0 — Session 8 TTL-testing clarification (done first, as scoped)
+## Part A — cross-session integration check (retention vs. DSAR erasure)
 
-See the dedicated section at the very top of this file. Summary: Session
-8's TTL test used a manually-constructed `ExportBundle` row and a
-directly-constructed signed URL, not an end-to-end "subject actually
-receives and uses this link" flow (that flow didn't exist until Session
-10 built it) — but Session 8 never claimed otherwise, and the guarantee
-that test does check (the row's own expiry independent of the URL
-signature) is real and still holds. No code change; no prior record
-needed correcting, both were accurate once read precisely.
+**Two distinct findings, neither ambiguous:**
 
-## What was built
+1. **Not a bug — the premise didn't hold.** The question assumed DSAR-driven
+   erasure (US-009) can erase local `consent_records`/`dsar_requests` data.
+   It cannot, as actually implemented: `DsarCompletionEvaluator`/
+   `DeletionCertificateGenerator` only ever update the `DsarRequest`'s own
+   `status` column and write a `DeletionCertificate`; erasure itself is
+   dispatched exclusively to *external* connectors over the ADR-0004 signed
+   webhook contract, which never touch this application's own database rows.
+   `RetentionExecutor` remains the **only** code path that ever
+   erases/anonymises either table's content. Demonstrated, not just
+   reasoned about: `tests/Feature/RetentionSelectorExclusionTest.php` runs a
+   real erasure DSAR to completion (verify → approve → connector callback
+   success) against a subject who also holds a retention-eligible
+   `ConsentRecord`, then confirms that record is byte-for-byte unchanged and
+   still correctly selected by `RetentionSelector` afterward.
+2. **A real bug, found and fixed.** While investigating the above,
+   `RetentionSelector::query()` turned out to have no way to exclude a row
+   `RetentionExecutor` had already anonymised in a *previous* run of the
+   *same* policy — `anonymise()` deliberately leaves the eligibility columns
+   (`status`/`withdrawn_at`/`created_at`) untouched (the row survives for
+   aggregate value), and the selector's WHERE clause only ever checked
+   those columns. Left unfixed, every subsequent scheduled `retention:execute`
+   run would re-select the same already-anonymised record forever,
+   pointlessly re-running `anonymise()` and — the actually harmful part —
+   minting a fresh `RetentionExecution` + `DeletionCertificate` on every run,
+   each falsely asserting "N record(s) anonymised" for data anonymised days
+   or weeks earlier. **Fixed** by excluding rows whose
+   `subject_identifier_hash` already carries the `'anonymised-'` marker both
+   `ConsentRecord::anonymise()`/`DsarRequest::anonymise()` write (reusing an
+   existing signal, no new column). Proven by two tests in the same file —
+   one per data category — each showing a second `retention:execute` run
+   affects 0 records and does not touch the already-anonymised row again.
+   ADR-0002's dry-run/execution parity is unaffected: both modes still
+   consume the identical `RetentionSelector::query()`, so the fix's
+   exclusion applies to both uniformly.
 
-### `retention.policy.manage` — the fourth registered sensitive action
+Both findings, plus the "not a bug, but here's why" reasoning, are logged in
+`09-decision-log.md` under their own headings, not folded into prose here.
 
-- **`App\Http\Controllers\Admin\DataCategoryController`** (new) —
-  `index`/`store` (`GET`/`POST /admin/data-categories`), and
-  **`App\Http\Controllers\Admin\RetentionPolicyController`** (new) —
-  `index`/`show`/`store`/`update`/`dryRun` (`GET`/`POST
-  /admin/retention-policies`, `GET`/`PATCH /admin/retention-policies/
-  {id}`, `POST /admin/retention-policies/{id}/dry-run`). All seven
-  endpoints share one gate, `retention.policy.manage`, following
-  `PolicyController`'s exact precedent (view and edit share one gate
-  rather than splitting a role-checked "view" from an ABAC-gated "edit")
-  — extended here to also cover the dry-run preview, since US-011 is
-  explicitly Privacy Manager's action too.
-- Unlike `policy.update` (Owner-only per ADR-0006), `retention.policy.manage`
-  admits **Owner or Privacy Manager** — the same shape as
-  `dsar.identity.verify`/`dsar.erasure.approve` —
-  matching US-010/011's own framing ("As a Privacy Manager, I want to
-  define... preview...").
-- **`PolicyDefinitionFactory::forRetentionPolicyManage()`** (new state).
-- **`tests/Feature/AuthorisationMatrixTest.php`** (rewritten, not just
-  extended) — now 4 actions, 20 cells (was 3/15). POST
-  `/admin/data-categories` is the representative endpoint (no dependent
-  resource to create first, unlike the retention-policy endpoints). The
-  "not-yet-built sensitive actions" section's retention row is replaced
-  with an explicit assertion that retention *execution* itself (the
-  scheduled real-run) is deliberately not a separate ABAC action — see
-  below.
-- **`tests/Feature/RetentionPolicyManagementTest.php`** (new, 12 tests) —
-  index/show/store/update/dry-run gating for both Owner and Privacy
-  Manager, Support Staff denial, both fail-closed reason codes
-  (`policy_missing`, `evaluation_error`), and field validation.
+**Other Part A confirmations (no code changes needed):**
+- `retention.policy.manage` **was already** in
+  `tests/Feature/AuthorisationMatrixTest.php`'s coverage as of Session 11 —
+  confirmed by reading the file, not assumed. At the start of this session
+  the matrix was 4 actions × 5 roles = 20 cells; after Session 12 adds
+  `ropa.export`, it is now **5 actions × 5 roles = 25 cells**.
+- `routes/console.php` **already had** a real
+  `Schedule::command(ExecuteRetentionPoliciesCommand::class)->daily()`
+  registration (Session 11) — confirmed by reading the file. No gap; no
+  change made.
 
-### `DataCategory`/`RetentionPolicy` (US-010) — first real implementation of ERD-only entities
+## Part B — RoPA Export (US-013, FR-016)
 
-- **`DataCategory`** — `subject_table` (new column beyond the ERD's listed
-  fields) is a closed enum, `consent_records`\|`dsar_requests`, naming
-  which of this instance's own tables a governing policy actually
-  queries. This is a deliberate, structural way of enforcing the ground
-  rule that retention must never target `audit_log_entries`/
-  `deletion_certificates`: the enum simply has no value for either, so
-  there is no code path by which either could be selected — not a
-  runtime check that could be bypassed or forgotten.
-- **`RetentionPolicy`** — versioned exactly like `PolicyDefinition`/
-  `ConsentNotice`: `data_category_id` is the grouping key across versions
-  (mirroring `PolicyDefinition.action_name`); `PATCH
-  /admin/retention-policies/{id}` supersedes the current row and creates
-  version+1, carrying the same data category forward (a policy's
-  category cannot change across versions — a different category is a new
-  policy, not an update to this one).
+### Architecture decision: on-demand generation, not a stored entity
 
-### `RetentionSelector`/`RetentionExecutor` (ADR-0002) — the centerpiece
+`03-architecture.md` turned out not to discuss this trade-off explicitly
+(the brief for this session assumed it did) — checked directly rather than
+assumed, the way Session 11 checked Session 8's TTL-testing claim rather
+than repeating it. What settled the question instead: `04-data-model.md`'s
+ERD never lists a `ROPA_RECORD` entity at all. Decision made this session,
+logged in `09-decision-log.md`: RoPA is generated fresh on every request by
+`App\Services\RopaGenerator`, reading `ConsentPurpose` (+ the new
+`DataCategory`/`RetentionPolicy` join below) at request time — never its
+own stored, independently-drifting row. No ADR reopened (none ever
+committed to a stored-RoPA design).
 
-- **`App\Services\RetentionSelector::query()`** is the *only* place
-  candidate-selection logic lives, exactly per ADR-0002's Option B.
-  Withdrawn `ConsentRecord` rows past their retention window are
-  eligible (active consent is never touched, regardless of age); terminal
-  `DsarRequest` rows (`complete`\|`partially_complete`\|`rejected`) past
-  theirs are eligible.
-- **`App\Services\RetentionExecutor`** consumes that same query for both
-  `preview()` (US-011, no side effects, still produces a
-  `RetentionExecution(mode: dry_run)` row per ADR-0002's "a dry run is
-  not free" consequence) and `execute()` (US-012, applies
-  `post_expiry_action`, then generates a `DeletionCertificate` and links
-  it back). Neither method branches the *selection* — only what happens
-  to the records afterward — which is the whole structural point.
-- **`tests/Feature/RetentionDryRunParityTest.php`** (new, 1 test, 22
-  assertions) — **the centerpiece test of this session**, per the
-  brief's explicit instruction. Asserts, against real seeded
-  `ConsentRecord` rows (some eligible, some not by status, some not by
-  age): the selector's own candidate IDs before the dry-run HTTP call,
-  the dry-run response's `sample_record_ids`, the selector's candidate
-  IDs again after "time passes" with unchanged data, and the real run's
-  affected count (via the actual scheduled artisan command, not the
-  service called directly) are all identical. Ineligible records are
-  confirmed untouched throughout.
+### The missing join: `CONSENT_PURPOSE` never linked to `DATA_CATEGORY`
 
-### Scheduled execution (US-012)
+Art. 30(1)(c) needs each purpose's retention period and its categories of
+data subjects/personal data. Neither was derivable from the existing
+schema: `DATA_CATEGORY` (Session 11) existed only as `RETENTION_POLICY`'s
+governing category, scoped to an entire physical table
+(`consent_records`\|`dsar_requests`), never linked to any specific
+`ConsentPurpose`. Closed this session with one small, additive migration
+(`2026_08_17_000001_add_ropa_fields_to_consent_purposes_table.php`, expand-
+first/nullable per `04-data-model.md`'s own migration approach): two new
+nullable columns on `consent_purposes` — `data_category_id` (FK) and
+`data_subjects_description` (free text) — both optional, both exposed via
+`StoreConsentPurposeRequest` so this is usable end-to-end via the real
+endpoint, not only via direct test setup. `RopaGenerator` joins purpose →
+linked category → that category's currently-active `RetentionPolicy`; a
+purpose with neither field set reports "not yet classified"/"no retention
+policy defined" honestly rather than fabricating a value (tested directly).
 
-- **`App\Console\Commands\ExecuteRetentionPoliciesCommand`**
-  (`retention:execute`), registered `->daily()` in `routes/console.php`
-  (the placeholder comment there since Session 5/8 anticipated exactly
-  this). Processes every currently-`active` `RetentionPolicy` each run.
-- **Erase**: `ConsentRecord::retentionErase()` (new method) — a
-  documented, deliberate bypass of `ConsentRecord::delete()`'s guard
-  (which exists to protect the *withdrawal* flow from becoming
-  destructive, not to block a genuinely separate, policy-driven erasure
-  path) via a query-builder delete that never instantiates the guarded
-  instance method. `DsarRequest::delete()` has no such guard, so erasure
-  there is a plain `delete()`.
-- **Anonymise**: `ConsentRecord::anonymise()`/`DsarRequest::anonymise()`
-  (new methods) sever the identifying column(s) (`subject_identifier_hash`,
-  and for `DsarRequest` also the encrypted `subject_identifier`) while
-  keeping the row and its status/timestamps for aggregate value.
-- **Deliberately NOT gated by `PolicyEvaluator`** — see the decision-log
-  entry below. Still writes its own `AUDIT_LOG_ENTRY`
-  (`actor_type: system`, `policy_id: null`) per US-014's blanket
-  logging requirement.
-- **`tests/Feature/RetentionExecutionTest.php`** (new, 6 tests) — erase
-  against real `consent_records`, anonymise against real `dsar_requests`
-  (proving both real data categories mentioned in the session brief are
-  actually wired, not just one token example), a deprecated policy being
-  skipped, a no-active-policies no-op, and two tests hitting the new DB
-  CHECK constraint directly (both sources set, neither set) to prove it's
-  real, not just asserted in a comment.
+**Known limitation, not fixed this session:** nothing in
+`RetentionPolicyController::store` prevents two independently-created
+`active` `RetentionPolicy` rows for the same `data_category_id` — a
+pre-existing Session 11 gap, not a Session 12 regression.
+`RopaGenerator` orders by `version desc, created_at desc` to stay
+deterministic if this ever occurs, but does not close the underlying gap.
 
-### Deletion certificate format — one decision made explicitly, per the brief's own instruction
+### `ropa.export` — the fifth registered sensitive action
 
-**Decision: shared table, not a new one** (this was already the ERD's
-design since Session 3 — `RETENTION_EXECUTION ||--o| DELETION_CERTIFICATE`
-— not a fresh redesign). What this session adds is real enforcement: a DB
-CHECK constraint (`deletion_certificates_exactly_one_source`) requiring
-exactly one of `dsar_request_id`/`retention_execution_id`, so DSAR-driven
-erasure (US-009) and retention-driven deletion (US-012) certificates are
-structurally distinguishable rather than merely conventionally so.
-Logged as a **decision-log entry, not a new ADR** (`09-decision-log.md`),
-following the same judgement call Session 7 made for cross-field/
-fail-closed documentation — this is an implementation detail within
-ADR-0002's existing scope, not a new architectural trade-off.
+`App\Http\Controllers\Admin\RopaController::export` (`GET
+/admin/ropa/export?format=pdf|csv`), gated by a new `ropa.export`
+`PolicyEvaluator` action — Owner or Privacy Manager (same shape as
+`retention.policy.manage`; the roles matrix names RoPA viewing as Privacy
+Manager's work and explicitly bars Support Staff). Fail-closed both ways
+(`policy_missing`, `evaluation_error`), audit-logged like every other
+sensitive action. `PolicyDefinitionFactory::forRopaExport()` (new state).
 
-A second, related decision is logged alongside it: scheduled retention
-execution deliberately sits outside `PolicyEvaluator` entirely (the
-worker/scheduler boundary `03-architecture.md` already draws — "a worker
-executes what has already been authorised, it does not re-decide"). This
-means ADR-0001's originally-anticipated "retention policy execution"
-sensitive action is **not** built as its own gate; `retention.policy.manage`
-(at policy definition/update time) is where that authorisation actually
-happens. Asserted directly in `AuthorisationMatrixTest.php`, not just
-noted in prose.
+### CSV and PDF formats
+
+- **CSV:** plain tabular export via `fputcsv`/`php://temp` (proper
+  comma/quote escaping, unlike `ExportBundleAssembler`'s simpler
+  `implode(',', ...)` approach — RoPA free-text fields are more likely to
+  contain commas than that export's fixed-shape fields).
+- **PDF:** `barryvdh/laravel-dompdf` (`^3.1`, new composer dependency,
+  installed cleanly — no conflicts, no new security advisories per
+  `composer require`'s own output) rendering
+  `resources/views/ropa/export.blade.php`. Chosen because it needs no
+  external binary (pure-PHP, unlike wkhtmltopdf/Snappy), so it adds nothing
+  to the container image's OS package surface. This is tooling, not a new
+  architectural pattern — does not count against the project's 2-new-
+  technology cap (ABAC, ASVS L2).
+
+### Live-scenario test — the centerpiece of Part B, per the brief's own instruction
+
+`tests/Feature/RopaExportTest.php`'s "US-013 AC1" test: creates a
+`DataCategory` + active `RetentionPolicy` (400 days, anonymise), a
+`ConsentPurpose` linked to that category with a `data_subjects_description`,
+and a second, unlinked purpose; exports (CSV) and confirms both purposes'
+correct content appears (name, lawful basis, category name/description,
+retention period, post-expiry action, data-subjects text); then
+**deprecates** the second purpose via a real `status` update and re-exports,
+confirming it now disappears while the first purpose is unaffected.
+
+**Deprecated purposes are excluded, not included** — this was found, not
+decided: `02-requirements.md`'s US-013 AC1 states the export covers "all
+**active** purposes" verbatim. Historical accountability for a deprecated
+purpose is served by the audit log (every `consent_purpose` create/update
+action is already logged there), not by a RoPA describing current
+processing activity.
 
 ## What was explicitly NOT done this session, and why
 
-1. **`R-01`/`R-02` — untouched**, per ground rules. `R-02`'s note in
-   `10-risk-register.md` is updated to name `retention.policy.manage` as
-   a fourth instance of the same bootstrap gap (no seeding mechanism for
-   any `PolicyDefinition` row) — this is a documentation update recording
-   that the same known gap now also applies here, not a new risk and not
-   a fix.
-2. **No ADR reopened.** ADR-0002 was implemented as designed — the
-   selector/executor split is exactly Option B, nothing about building it
-   for real revealed a wrinkle that needed the ADR itself revisited.
-3. **No manual "run retention now" HTTP endpoint.** US-012 asks for
-   scheduled execution specifically; a manual trigger wasn't requested
-   and would need its own ABAC gate (most naturally reusing
-   `retention.policy.manage`) if added later — noted in the decision log
-   as the one case that *would* need a new gate.
-4. **RoPA (US-013/FR-016) — not started**, unrelated to this session's
-   scope; proposed as the next session below.
+1. **`R-01`/`R-02` — untouched in substance.** `R-02`'s note in
+   `10-risk-register.md` is updated to name `ropa.export` as a fifth
+   instance of the same bootstrap gap (no seeding mechanism for any
+   `PolicyDefinition` row), and confirms there is still no
+   `database/seeders/` directory at all — a documentation update recording
+   the same known gap now also applies here, not a new risk and not a fix.
+2. **No ADR reopened.** RoPA's on-demand-generation decision and the new
+   `CONSENT_PURPOSE`→`DATA_CATEGORY` link are both logged as decision-log
+   entries, not ADRs — neither reverses or extends an existing ADR's
+   trade-off.
+3. **The `RetentionPolicyController::store` duplicate-active-policy gap**
+   (found while building `RopaGenerator`'s join) is noted as a known
+   limitation, not fixed — it predates this session and fixing it is
+   retention-policy-CRUD validation work, not RoPA export work.
+4. **No frontend work of any kind.** Consistent with every prior session —
+   this repository's SDLC depth is on requirements/architecture/ABAC/testing,
+   not UI. See the MVP-completeness check below for what this leaves open.
 
 ## Files created or changed
 
-**Migrations:** `database/migrations/2026_08_16_000001_create_data_categories_table.php`,
-`..._000002_create_retention_policies_table.php`,
-`..._000003_create_retention_executions_table.php`,
-`..._000004_add_retention_execution_foreign_to_deletion_certificates_table.php`.
+**Migrations:** `database/migrations/2026_08_17_000001_add_ropa_fields_to_consent_purposes_table.php`.
 
-**Models:** `app/Models/DataCategory.php`, `RetentionPolicy.php`,
-`RetentionExecution.php` (new); `app/Models/DeletionCertificate.php`
-(new `retentionExecution()` relation), `app/Models/ConsentRecord.php`
-(new `retentionErase()`/`anonymise()` methods), `app/Models/DsarRequest.php`
-(new `anonymise()` method).
+**Models:** `app/Models/ConsentPurpose.php` (`data_category_id`/
+`data_subjects_description` fillable, new `dataCategory()` relation).
 
-**Factories:** `database/factories/DataCategoryFactory.php`,
-`RetentionPolicyFactory.php`, `RetentionExecutionFactory.php` (new);
-`database/factories/PolicyDefinitionFactory.php`
-(`forRetentionPolicyManage()` state).
+**Services:** `app/Services/RopaGenerator.php` (new); `app/Services/
+RetentionSelector.php` (Part A bug fix — excludes already-anonymised rows).
 
-**Services:** `app/Services/RetentionSelector.php`,
-`RetentionExecutor.php` (new).
+**Controllers:** `app/Http/Controllers/Admin/RopaController.php` (new).
 
-**Controllers:** `app/Http/Controllers/Admin/DataCategoryController.php`,
-`RetentionPolicyController.php` (new).
+**Requests/Resources:** `app/Http/Requests/StoreConsentPurposeRequest.php`
+(new optional fields), `app/Http/Resources/ConsentPurposeResource.php`
+(exposes them).
 
-**Requests/Resources:** `app/Http/Requests/StoreDataCategoryRequest.php`,
-`StoreRetentionPolicyRequest.php`, `UpdateRetentionPolicyRequest.php`,
-`app/Http/Resources/DataCategoryResource.php`,
-`RetentionPolicyResource.php` (all new).
+**Views:** `resources/views/ropa/export.blade.php` (new).
 
-**Console:** `app/Console/Commands/ExecuteRetentionPoliciesCommand.php`
-(new); `routes/console.php` (schedule registration).
+**Factories:** `database/factories/PolicyDefinitionFactory.php`
+(`forRopaExport()` state).
 
-**Routes:** `routes/api.php` — new `/admin/data-categories`,
-`/admin/retention-policies` (+ `/{id}`, `/{id}/dry-run`) routes.
+**Console/Routes:** `routes/api.php` (new `GET /admin/ropa/export` route).
 
-**Tests:** `tests/Feature/RetentionPolicyManagementTest.php` (new, 12
-tests), `tests/Feature/RetentionDryRunParityTest.php` (new, 1 test, 22
-assertions), `tests/Feature/RetentionExecutionTest.php` (new, 6 tests),
-`tests/Feature/AuthorisationMatrixTest.php` (rewritten for 4 actions, net
-+5 tests).
+**Dependencies:** `composer.json`/`composer.lock` — added
+`barryvdh/laravel-dompdf` (`^3.1`); `config/dompdf.php` published.
 
-**Docs:** `docs/architecture/openapi.yaml` (new paths
-`/admin/data-categories`, `/admin/retention-policies` (+ sub-paths);
-extended `/admin/retention-policies/{policyId}/dry-run`; new schemas
-`DataCategory`, `DataCategoryRequest`, `RetentionPolicy`,
-`RetentionPolicyRequest`, `RetentionPolicyUpdateRequest`),
-`docs/project-memory/04-data-model.md` (`DATA_CATEGORY`/
-`RETENTION_POLICY`/`RETENTION_EXECUTION` implementation notes,
-`DELETION_CERTIFICATE` shared-format note, two new invariants, Retention
-and deletion rules section extended), `docs/project-memory/09-decision-log.md`
-(two new entries: deletion certificate format, retention execution
-scheduler boundary), `docs/project-memory/07-testing-strategy.md`
-(NFR-005 section updated for 4 actions/20 cells),
-`docs/project-memory/10-risk-register.md` (`R-02` note updated), this
-file.
+**Tests:** `tests/Feature/RetentionSelectorExclusionTest.php` (new, 3
+tests — Part A), `tests/Feature/RopaExportTest.php` (new, 8 tests — Part
+B), `tests/Feature/AuthorisationMatrixTest.php` (extended to 5 actions/25
+cells, net +5 dataset cells).
+
+**Docs:** `docs/architecture/openapi.yaml` (`/admin/ropa/export`'s 403/422
+responses documented; `ConsentPurposeRequest`/`ConsentPurpose` schemas
+extended with the two new fields), `docs/project-memory/04-data-model.md`
+(`CONSENT_PURPOSE` entity/ERD updated, new "no `ROPA_RECORD` entity"
+note, Retention and deletion rules section extended with both Part A
+findings), `docs/project-memory/09-decision-log.md` (four new entries:
+the Part A bug fix, the Part A non-bug finding, RoPA on-demand generation,
+the purpose→category link + PDF library choice),
+`docs/project-memory/07-testing-strategy.md` (NFR-005 section updated for
+5 actions/25 cells), `docs/project-memory/10-risk-register.md` (`R-02`
+note updated), `docs/project-memory/05-api-contracts.md` (RoPA export
+endpoint marked implemented), `docs/project-memory/01-scope-and-non-goals.md`
+(MVP boundary checklist checked item-by-item — see below), this file.
 
 ## Validation performed
 
-- `docker compose exec app php artisan test` → **134/134 passed** (110
-  pre-existing + 24 new), against live PostgreSQL + Redis.
-- `composer lint` (Pint) → pass, no changes needed.
-- `composer analyse` (Larastan level 8) → 2 real nullability findings
-  surfaced and fixed (`RetentionSelector::query()`,
-  `RetentionExecutor::summarise()`, both accessing `RetentionPolicy->
-  dataCategory` — a NOT NULL foreign key in practice, but `BelongsTo`'s
-  return type is nullable) — fixed with the same explicit `=== null`
-  check pattern `DeletionCertificateGenerator::connectorName()` already
-  established, plus removing a `match()` default arm PHPStan correctly
-  identified as unreachable once the enum's exact 2-value type was known
-  → 0 errors after the fix.
-- `docker compose exec app php artisan migrate:rollback --step=4` →
-  `migrate` again → clean (up/down/up parity for all four new
-  migrations).
+- `docker compose exec app php artisan test` → **150/150 passed** (134
+  pre-existing + 16 new), against live PostgreSQL + Redis.
+- `vendor/bin/pint --test` → pass, no changes needed (run directly;
+  `composer lint`'s own wrapper hit composer's 300s script timeout on this
+  machine — not a code issue, just a slower-than-usual container this
+  session).
+- `vendor/bin/phpstan analyse --memory-limit=1G` (Larastan level 8) → 5
+  real findings surfaced and fixed (`RopaController::csvResponse` — every
+  `fopen`/`fputcsv`/`rewind`/`stream_get_contents`/`fclose` call site
+  needed the same explicit `=== false` guard pattern
+  `DeletionCertificateGenerator::connectorName()` already established for
+  a different nullable-in-theory-but-guaranteed-in-practice case) → 0
+  errors after the fix.
+- `docker compose exec app php artisan migrate:rollback --step=1` →
+  `migrate` again → clean (up/down/up parity for the one new migration).
 - `docs/architecture/openapi.yaml` validated with `python -m
-  openapi_spec_validator` (containerised, same tool CI uses) → **OK**.
-- No `.env.example` or config changes this session.
-- Pushed to `origin/main` as a single commit after confirming all of the
-  above passed for real (the user was asked, and chose to commit and
-  push immediately).
+  openapi_spec_validator` → **OK** (run in a throwaway `python:3.12-slim`
+  Docker container — neither the app container nor this host machine has
+  Python installed, unlike whatever machine ran this check in prior
+  sessions; noted so a future session isn't surprised by the same gap).
+- No `.env.example` changes this session.
+- **Not yet pushed** — awaiting confirmation before push, per the ground
+  rules ("commit and push only after confirming tests genuinely pass").
+
+## MVP-completeness check (explicitly requested this session)
+
+Checked `01-scope-and-non-goals.md`'s MVP boundary checklist item-by-item
+against the actual codebase (not re-asserted from memory) now that both
+retention and RoPA — the two items this session and Session 11 targeted —
+are backend-complete. **Verdict: 5 of 9 items are genuinely complete; the
+project is not yet MVP-complete per its own Definition.** Full detail is in
+`01-scope-and-non-goals.md` itself (checkboxes now reflect real status);
+summary:
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Consent registry | Backend complete; **no embeddable widget exists** |
+| 2 | DSAR | Backend complete; **no public intake portal UI exists** |
+| 3 | Retention policies | ✅ Complete |
+| 4 | RoPA register with export | ✅ Complete (this session) |
+| 5 | Tamper-evident audit log | Hash chain complete; **no periodic external anchor exists** |
+| 6 | ABAC authorisation | ✅ Complete (5 actions, 25 cells, zero discrepancies) |
+| 7 | Single organisation per instance | ✅ Complete |
+| 8 | GDPR/UK-GDPR only | ✅ Complete |
+| 9 | Public demo instance | **Not done** — no `database/seeders/` directory exists at all; `08-deployment-and-operations.md` is an entirely unwritten stub |
+
+Items 1, 2, and 5 share one root cause: `resources/js/` contains only the
+default Inertia scaffold (`Pages/Welcome.vue`) — this repository has no
+frontend implementation beyond that scaffold anywhere, for any feature,
+despite every backend/API slice (consent, DSAR, retention, RoPA, ABAC)
+being real and tested. Item 9 is independent — no seeders, no documented
+demo deployment. A related, smaller discrepancy surfaced while checking
+item 9: `03-architecture.md` states backup restore drills were "recorded
+in `08-deployment-and-operations.md` (Session 8)," but that file has zero
+content under any section header, including "Backup and restore." Flagged
+here explicitly rather than left for a future session to discover the way
+Session 11 had to check Session 8's TTL-testing claim.
 
 ## Open questions and risks
 
-- **`R-01`/`R-02` — unchanged in substance, `R-02`'s note updated** to
-  name `retention.policy.manage` as a fourth instance of the same
-  bootstrap gap. Neither risk resolved this session, per ground rules.
-- **Manual "run retention now" HTTP trigger** — not built, not requested;
-  if added later it needs its own `retention.policy.manage` gate (see
-  decision log).
-- **RoPA (US-013/FR-016)** — still not started; proposed as the next
-  session below.
+- **`R-01`/`R-02` — unchanged in substance**, `R-02`'s note updated to name
+  `ropa.export` as a fifth instance of the same bootstrap gap. Neither
+  risk resolved this session, per ground rules.
+- **`RetentionPolicyController::store`'s duplicate-active-policy gap**
+  (found this session, not fixed — see "What was explicitly NOT done"
+  above).
+- **No frontend beyond the Inertia scaffold** — the largest remaining
+  MVP-completeness gap; affects three of the four incomplete checklist
+  items.
+- **Audit-log periodic anchor** — not built; entry-level tamper detection
+  is real, the stronger anchored guarantee is not yet in place.
+- **Public demo instance / seeders** — not built; `08-deployment-and-
+  operations.md`'s Session-8 backup-drill cross-reference does not
+  currently resolve to any actual content.
 
 ## Next recommended session
 
-- Proposed session title: **RoPA export (US-013, FR-016)** — the other
-  remaining "Must"-priority MVP gap (per the RTM in `02-requirements.md`),
-  now that retention is the largest of the two closed.
-- Inputs required: `docs/architecture/openapi.yaml`,
-  `docs/project-memory/12-session-handoff.md` (this file),
-  `docs/project-memory/02-requirements.md` (US-013 acceptance criteria),
-  `docs/project-memory/04-data-model.md` (CONSENT_PURPOSE/
-  RETENTION_POLICY, the entities a RoPA export actually reports on).
+- Proposed session title: **either** the embeddable consent widget + DSAR
+  portal (closes the largest MVP gap, items 1/2), **or** the audit-log
+  periodic anchor (ADR-0003's remaining half, item 5) — both are genuine
+  "Must"-priority gaps now that retention and RoPA are done; the frontend
+  work is larger in scope, the anchor job is narrower and more
+  self-contained. Recommend anchor first if the next session should stay
+  narrowly scoped like this one and Session 11 were; recommend the
+  frontend slice if the next session is meant to be a larger, dedicated
+  build.
+- Inputs required: `docs/project-memory/12-session-handoff.md` (this
+  file), `docs/project-memory/01-scope-and-non-goals.md` (MVP checklist),
+  `docs/adr/ADR-0003-audit-log-tamper-evidence.md` (if anchor is chosen),
+  `docs/architecture/openapi.yaml` (if the frontend slice is chosen —
+  confirms the exact contract the widget/portal must call).
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 11
-complete and **pushed to `origin/main`**.
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 12
+complete, **not yet pushed** (awaiting confirmation).
 
-**Current stack:** unchanged — Laravel 11, Vue 3/Inertia, PostgreSQL,
-Redis, S3-compatible storage. No stack changes this session.
+**Current stack:** Laravel 11, Vue 3/Inertia, PostgreSQL, Redis,
+S3-compatible storage, **plus `barryvdh/laravel-dompdf` (new this
+session, PDF rendering only — tooling, not a new architectural pattern)**.
 
 **Architecture decisions that must not be reversed:** all decisions from
-Sessions 0–10 remain in force, including ADR-0002 (implemented, not
-modified, this session). No new ADR was added — the two decisions this
-session made (deletion certificate shared format; scheduled execution
-not ABAC-gated) are documented in `09-decision-log.md` as decision-log
-entries, not ADRs, since neither reverses or extends an existing ADR's
-trade-off.
+Sessions 0–11 remain in force. Two new decision-log entries this session
+(RoPA on-demand generation; the `CONSENT_PURPOSE`→`DATA_CATEGORY` link +
+PDF library choice) — neither is an ADR, neither reverses or extends an
+existing ADR's trade-off.
 
 **Implementation state:**
 - Done: consent-capture slice (US-001–004); DSAR submission + status +
   identity verification + erasure approval (US-005/006); connector
   dispatch, callback, retry/anomaly handling, export bundle assembly, and
   deletion certificates (US-007/008/009); the exhaustive (role ×
-  sensitive-action) authorisation test suite, now covering 4 actions
-  (NFR-005); staff-facing DSAR queue; export/certificate readiness;
-  `policy.update`; **retention (US-010/011/012): data category/retention
-  policy CRUD gated by `retention.policy.manage`, the dry-run/execution
-  parity guarantee (ADR-0002), and scheduled real execution against real
-  `consent_records`/`dsar_requests` data, producing deletion
-  certificates.**
+  sensitive-action) authorisation test suite, now covering **5 actions,
+  25 cells** (NFR-005); staff-facing DSAR queue; export/certificate
+  readiness; `policy.update`; retention (US-010/011/012) with a Session 12
+  bug fix (already-anonymised records no longer re-selected); **RoPA
+  export (US-013/FR-016): `ropa.export` gate, CSV + PDF, generated on
+  demand, live-scenario-tested including purpose deprecation.**
 - In progress: nothing mid-flight.
 - **Known gaps to check first:** (1) still no bootstrap/seeder for
-  `PolicyDefinition` rows on a fresh instance (`R-02`) — create
-  `dsar.identity.verify`, `dsar.erasure.approve`, `policy.update`, and now
-  `retention.policy.manage` policy rows manually before testing; (2) no
-  connector is registered by default either — run `php artisan
-  connectors:register-reference` first; (3) no `DataCategory`/
-  `RetentionPolicy` rows exist by default either — a fresh instance has
-  no retention policies until a Privacy Manager/Owner defines them via
-  the new endpoints.
-- Not started: RoPA export (US-013), connector secret rotation, HTTP
-  connector-management (deliberately deferred, Session 10), email/
-  notification delivery for export/certificate readiness (deferred,
-  Session 10), a manual "run retention now" HTTP trigger (not requested).
+  `PolicyDefinition` rows on a fresh instance (`R-02`) — now five actions
+  need manual rows: `dsar.identity.verify`, `dsar.erasure.approve`,
+  `policy.update`, `retention.policy.manage`, `ropa.export`; (2) no
+  connector is registered by default (`connectors:register-reference`);
+  (3) no `DataCategory`/`RetentionPolicy` rows exist by default; (4) no
+  `ConsentPurpose` has `data_category_id`/`data_subjects_description` set
+  by default — RoPA reports "not yet classified" until a Privacy
+  Manager/Owner links one.
+- Not started: the embeddable consent widget, the DSAR public intake
+  portal (no frontend exists beyond the default Inertia scaffold — this
+  is the largest remaining MVP gap), the audit-log periodic external
+  anchor, the public demo instance (no seeders exist at all), connector
+  secret rotation, HTTP connector-management (deliberately deferred,
+  Session 10), email/notification delivery for export/certificate
+  readiness (deferred, Session 10), a manual "run retention now" HTTP
+  trigger (not requested), the `RetentionPolicyController::store`
+  duplicate-active-policy validation gap (found this session).
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the
-2-new-technology cap (ABAC, ASVS L2) — this session introduced no new
-technology.
+2-new-technology cap (ABAC, ASVS L2) — `barryvdh/laravel-dompdf` is
+tooling, not a new architectural pattern, and does not count against it.
 
-**Task for next session (single objective):** RoPA export (US-013,
-FR-016) — see "Next recommended session" above.
+**Task for next session (single objective):** either the audit-log
+periodic anchor or the consent widget/DSAR portal frontend slice — see
+"Next recommended session" above; the user should confirm which before
+the next session starts.
 
 **Files to attach or paste:**
-- `docs/architecture/openapi.yaml`
 - `docs/project-memory/12-session-handoff.md` (this file)
-- `docs/project-memory/02-requirements.md` (US-013 acceptance criteria)
-- `docs/project-memory/04-data-model.md` (CONSENT_PURPOSE/RETENTION_POLICY)
+- `docs/project-memory/01-scope-and-non-goals.md` (MVP checklist)
+- `docs/adr/ADR-0003-audit-log-tamper-evidence.md` (if anchor is chosen)
+- `docs/architecture/openapi.yaml` (if the frontend slice is chosen)
 
-**Ground rules:** Do not change the stack. Do not reopen any existing ADR.
-`R-01`/`R-02` remain open — do not fold a fix in silently.
+**Ground rules:** Do not change the stack beyond tooling additions already
+made. Do not reopen any existing ADR. `R-01`/`R-02` remain open — do not
+fold a fix in silently.

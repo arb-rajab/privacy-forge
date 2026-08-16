@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-14
+> Last updated: 2026-08-17
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -120,6 +120,121 @@ detail.
 - Still audit-logged (`actor_type: system`, `policy_id: null`) per
   US-014's blanket requirement that every retention action is logged,
   independent of whether an ABAC decision was made.
+
+## Bug found and fixed: RetentionSelector re-selected already-anonymised records (Session 12, 2026-08-17)
+
+- **Finding:** `RetentionSelector::query()`'s WHERE clauses only ever
+  checked the retention-eligibility columns (`status`/`withdrawn_at` for
+  `consent_records`, `status`/`created_at` for `dsar_requests`) — neither
+  branch excluded a row `RetentionExecutor::apply()` had already
+  anonymised. `anonymise()` deliberately leaves those exact columns
+  untouched (the whole point of anonymise vs erase is that the row
+  survives), so every subsequent scheduled `retention:execute` run
+  re-selected the same already-anonymised row forever: re-running
+  `anonymise()` pointlessly, and — the actually harmful part — minting a
+  fresh `RetentionExecution`(mode: real) + `DeletionCertificate` on every
+  run, each one asserting "N record(s) anonymised" for a record anonymised
+  days or weeks earlier. This was caught while investigating a
+  cross-session question (does a later retention sweep ever re-process
+  data that's already gone?) — the specific scenario asked about
+  (DSAR-driven erasure leaving stale data for retention to re-select)
+  turned out not to apply (see the finding immediately below), but this
+  adjacent, real bug in the same selector was found in the process.
+- **Fix:** `RetentionSelector::query()` now also excludes rows whose
+  `subject_identifier_hash` already carries the `'anonymised-'` prefix
+  both `ConsentRecord::anonymise()`/`DsarRequest::anonymise()` write —
+  reusing an existing, already-deliberate marker rather than adding a new
+  column. Proven by
+  `tests/Feature/RetentionSelectorExclusionTest.php`, which fails against
+  the pre-fix selector (a second `retention:execute` run re-anonymises and
+  re-certifies) and passes against the fix (second run affects 0 records).
+- **Not a parity regression:** ADR-0002's dry-run/execution parity
+  guarantee is unaffected — both `preview()` and `execute()` still consume
+  the exact same `RetentionSelector::query()`, so the fix's exclusion
+  applies identically to both modes.
+
+## Finding, not a bug: DSAR-driven erasure never mutates local consent_records/dsar_requests data (Session 12, 2026-08-17)
+
+- **Finding:** the same cross-session investigation above also checked
+  whether a completed DSAR erasure (US-009) could leave `consent_records`/
+  `dsar_requests` rows in a state a later retention sweep would need to
+  exclude. It does not: `DsarCompletionEvaluator`/
+  `DeletionCertificateGenerator` only ever update the `DsarRequest`'s own
+  `status` column and write a `DeletionCertificate` — erasure itself is
+  dispatched exclusively to *external* connectors over the ADR-0004
+  webhook contract, which never touch this application's own database
+  rows. `RetentionExecutor` remains the *only* code path that ever
+  erases/anonymises `consent_records`/`dsar_requests` content.
+- **Demonstrated, not assumed:** `tests/Feature/
+  RetentionSelectorExclusionTest.php` runs a real erasure DSAR to
+  completion (verify → approve → connector callback success) against a
+  subject who also holds a retention-eligible `ConsentRecord`, then
+  confirms that record is byte-for-byte unchanged and still correctly
+  selected by `RetentionSelector` — there is nothing to exclude on this
+  account, because there is nothing DSAR erasure ever touches here.
+- **Not logged as a risk:** since there is no code path today that could
+  produce the scenario the original question worried about, there is
+  nothing open to track in `10-risk-register.md`. If a future session ever
+  wires DSAR erasure to also erase this instance's own locally-held data
+  (mirroring how `ExportBundleAssembler` already draws export content from
+  it), that session would need to revisit `RetentionSelector`'s exclusions
+  again at that time.
+
+## RoPA generated on demand, not stored (Session 12, 2026-08-17)
+
+- **Decision:** the RoPA export (US-013/FR-016) is generated fresh on every
+  request from `App\Services\RopaGenerator`, reading `ConsentPurpose` (+
+  the newly-added `DataCategory`/`RetentionPolicy` join below) at request
+  time. There is no `ROPA_RECORD` table and none was added.
+- **Why, since no ADR or architecture doc discussion existed to follow:**
+  `04-data-model.md`'s ERD never listed a RoPA entity in the first place —
+  checked before deciding, per this session's own instruction, rather than
+  assumed. A stored RoPA would need its own update path kept in lockstep
+  with every purpose/category/policy change it describes, and any gap in
+  that lockstep is exactly the kind of "RoPA lied about what we actually
+  do" failure Art. 30 exists to prevent. Generating on demand makes that
+  class of drift structurally impossible rather than merely disciplined.
+- **Not an ADR:** no existing ADR ever committed to a stored-RoPA design,
+  so there is nothing to reopen — this is a new, narrow implementation
+  decision within US-013's scope, logged here per the same judgement call
+  Session 11 made for its own two decision-log-only entries.
+
+## RoPA content: CONSENT_PURPOSE linked to DATA_CATEGORY, PDF via barryvdh/laravel-dompdf (Session 12, 2026-08-17)
+
+- **Finding:** `04-data-model.md`'s ERD never linked `CONSENT_PURPOSE` to
+  `DATA_CATEGORY` — `DATA_CATEGORY` existed solely as `RETENTION_POLICY`'s
+  governing category (Session 11), scoped to an entire physical table
+  (`consent_records`\|`dsar_requests`), not to any one purpose. Art.
+  30(1)(c) needs a purpose's retention period and its categories of data
+  subjects/personal data; neither was derivable from the existing schema.
+- **Decision:** added two nullable columns to `consent_purposes` —
+  `data_category_id` (FK to `data_categories`, nullable, `nullOnDelete`)
+  and `data_subjects_description` (free text) — an expand-first migration
+  per `04-data-model.md`'s own migration approach. `RopaGenerator` joins
+  purpose → linked category → that category's currently-active
+  `RetentionPolicy` for the retention-period/post-expiry-action columns. A
+  purpose with neither field set reports "not yet classified"/"no
+  retention policy defined" honestly, rather than fabricating a value.
+  `StoreConsentPurposeRequest` accepts both as optional fields so this is
+  usable end-to-end via the real endpoint, not only via direct test setup.
+- **Known limitation, not fixed this session:** nothing in
+  `RetentionPolicyController::store` prevents two independently-created
+  `active` `RetentionPolicy` rows for the same `data_category_id` (only
+  `::update`'s supersede-then-create path guarantees uniqueness) — a
+  pre-existing Session 11 gap. `RopaGenerator` orders by
+  `version desc, created_at desc` to stay deterministic if this ever
+  occurs, but does not close the underlying gap; out of this session's
+  scope (RoPA export, not retention-policy CRUD validation).
+- **PDF library:** `barryvdh/laravel-dompdf` (`^3.1`, wrapping
+  `dompdf/dompdf`), rendering a Blade view (`resources/views/ropa/
+  export.blade.php`). Chosen because it needs no external binary (unlike
+  wkhtmltopdf/Snappy) — pure-PHP, so it adds nothing to the container
+  image's OS package surface — and is the most widely-used
+  Laravel-specific PDF wrapper. This is tooling, not a new architectural
+  pattern, so it does not count against the project's 2-new-technology
+  cap (ABAC, ASVS L2) confirmed in `12-session-handoff.md`; `composer
+  require` completed with no dependency conflicts and no new security
+  advisories.
 
 ## ADR-0005 — Single-Organisation Data Model (No Tenant Column)
 - **Date:** 2026-08-11 · **Status:** accepted · [Full ADR](../adr/ADR-0005-single-organisation-data-model.md)

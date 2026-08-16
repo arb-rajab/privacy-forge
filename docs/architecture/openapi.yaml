@@ -523,7 +523,15 @@ paths:
   /admin/ropa/export:
     get:
       tags: [Admin — RoPA and Audit]
-      summary: Export the Record of Processing Activities (FR-016, US-013)
+      summary: >
+        Export the Record of Processing Activities (FR-016, US-013).
+        Generated on demand from currently active consent purposes (never
+        a stored, independently-drifting copy — see 09-decision-log.md) —
+        gated by the ropa.export sensitive action (Owner or Privacy
+        Manager, ADR-0001), covering all active purposes with their lawful
+        basis, linked retention period, and categories of data
+        subjects/data involved. A deprecated purpose is excluded, per
+        US-013 AC1's own "active purposes" wording.
       security: [{ staffAuth: [] }]
       parameters:
         - name: format
@@ -535,6 +543,10 @@ paths:
           content:
             application/pdf: {}
             text/csv: {}
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '422':
+          description: format was not one of pdf, csv
 
   /admin/audit-log:
     get:
@@ -635,6 +647,24 @@ components:
         lawful_basis:
           type: string
           enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests]
+        data_category_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Links this purpose to the DataCategory whose retention policy
+            governs its consent records — the join Session 12's RoPA
+            export (US-013/FR-016) uses to derive a purpose's retention
+            period. Optional; a purpose with none set reports no retention
+            period in the RoPA export until one is linked.
+        data_subjects_description:
+          type: string
+          nullable: true
+          description: >
+            Free-text categories of data subjects this purpose concerns
+            (Art. 30(1)(c)) — e.g. "Newsletter subscribers". Added Session
+            12 alongside data_category_id; both are RoPA-only content, not
+            required for consent capture itself.
 
     ConsentPurpose:
       type: object
@@ -647,6 +677,8 @@ components:
           enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests]
         status: { type: string, enum: [active, deprecated] }
         version: { type: integer }
+        data_category_id: { type: string, format: uuid, nullable: true }
+        data_subjects_description: { type: string, nullable: true }
 
     ConsentNoticeRequest:
       type: object

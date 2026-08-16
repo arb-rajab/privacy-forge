@@ -55,14 +55,28 @@ class RetentionSelector
                 // question is open," i.e. while it is still active.
                 ->where('status', 'withdrawn')
                 ->whereNotNull('withdrawn_at')
-                ->where('withdrawn_at', '<=', $cutoff),
+                ->where('withdrawn_at', '<=', $cutoff)
+                // A prior anonymise run already applied this policy's
+                // consequence to this row (erase instead removes the row
+                // outright, so it simply can't reappear here — this
+                // exclusion only matters for the anonymise action). Without
+                // it, an anonymised row's status/withdrawn_at are left
+                // untouched by design (retentionErase() keeps the row for
+                // aggregate value), so every subsequent scheduled run would
+                // re-select and re-certify it forever.
+                ->where('subject_identifier_hash', 'not like', 'anonymised-%'),
             DataCategory::SUBJECT_TABLE_DSAR_REQUESTS => DsarRequest::query()
                 // Only DSARs that have reached a terminal state are
                 // eligible — an in-progress or pending request is still
                 // open work, not yet subject to a post-closure retention
                 // clock.
                 ->whereIn('status', ['complete', 'partially_complete', 'rejected'])
-                ->where('created_at', '<=', $cutoff),
+                ->where('created_at', '<=', $cutoff)
+                // Same re-selection guard as above: DsarRequest::anonymise()
+                // leaves status/created_at untouched, so this exclusion is
+                // what stops an already-anonymised request from being
+                // re-processed by every future scheduled run.
+                ->where('subject_identifier_hash', 'not like', 'anonymised-%'),
         };
     }
 }

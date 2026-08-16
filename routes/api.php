@@ -24,6 +24,7 @@ use App\Http\Controllers\Admin\DsarController as AdminDsarController;
 use App\Http\Controllers\Admin\DsarQueueController;
 use App\Http\Controllers\Admin\PolicyController;
 use App\Http\Controllers\Admin\RetentionPolicyController;
+use App\Http\Controllers\Admin\RopaController;
 use App\Http\Controllers\ConnectorCallbackController;
 use App\Http\Controllers\ConsentController;
 use App\Http\Controllers\DsarController;
@@ -81,5 +82,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/retention-policies/{policyId}', [RetentionPolicyController::class, 'show']);
         Route::patch('/retention-policies/{policyId}', [RetentionPolicyController::class, 'update']);
         Route::post('/retention-policies/{policyId}/dry-run', [RetentionPolicyController::class, 'dryRun']);
+
+        // ropa.export (Session 12, US-013/FR-016) — the fifth registered
+        // sensitive action. Owner or Privacy Manager, per the roles matrix.
+        Route::get('/ropa/export', [RopaController::class, 'export']);
     });
 });
