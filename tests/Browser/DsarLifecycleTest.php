@@ -20,13 +20,36 @@ use Illuminate\Support\Facades\Http;
 //
 // There is no admin UI yet (01-scope-and-non-goals.md still lists "a
 // richer admin dashboard" as backlog) — the admin verify/approve steps
-// below go through the same JSON API a real admin client would call,
-// authenticated the same way every other feature test in this suite
-// does (Pest's actingAs()). Both this and the browser-driven steps run
-// in the same PHP process against the same RefreshDatabase transaction
-// — Pest Browser Testing's LaravelHttpServer dispatches every
-// browser-originated request through this same application instance,
-// it does not shell out to a separate `php artisan serve` process.
+// below go through the same JSON API a real admin client would call.
+// As of R-05 (10-risk-register.md), that call is authenticated via a
+// genuine POST /login round-trip (App\Http\Controllers\Auth\
+// AuthenticatedSessionController), not Pest's actingAs() test shortcut —
+// actingAs() sets the auth guard directly and was never proof that a
+// real HTTP session could be established at all. Laravel's test HTTP
+// client does not automatically carry cookies between separate calls
+// within a test, so the session cookie POST /login actually issues is
+// captured and forwarded by hand on the follow-up calls below, exactly
+// as a real browser would do it invisibly. Both this and the
+// browser-driven steps run in the same PHP process against the same
+// RefreshDatabase transaction — Pest Browser Testing's LaravelHttpServer
+// dispatches every browser-originated request through this same
+// application instance, it does not shell out to a separate
+// `php artisan serve` process.
+function loginAndCaptureSessionCookie(string $email, string $password): string
+{
+    $response = test()->postJson('/login', ['email' => $email, 'password' => $password]);
+    $response->assertOk();
+
+    $sessionCookieName = config('session.cookie');
+
+    foreach ($response->headers->getCookies() as $cookie) {
+        if ($cookie->getName() === $sessionCookieName) {
+            return $cookie->getValue();
+        }
+    }
+
+    throw new RuntimeException("Login response did not set the {$sessionCookieName} cookie.");
+}
 test('US-METRIC-1: a fresh visitor completes consent -> DSAR erasure -> admin verify/approve -> status shows completion -> withdrawal', function () {
     PolicyDefinition::factory()->create();
     PolicyDefinition::factory()->forErasureApproval()->create();
@@ -65,14 +88,36 @@ test('US-METRIC-1: a fresh visitor completes consent -> DSAR erasure -> admin ve
         ->firstOrFail();
     expect($dsar->request_type)->toBe('erasure');
 
-    // Act 3 — an admin verifies identity, then a *different* admin
-    // approves the erasure (ADR-0007 separation-of-duties).
-    $this->actingAs($verifier)->postJson("/api/v1/admin/dsar/{$dsar->id}/verify-identity")
+    // Act 3 — an admin logs in for real (POST /login, the actual
+    // AuthenticatedSessionController — see R-05) and verifies identity,
+    // then a *different* admin logs in and approves the erasure
+    // (ADR-0007 separation-of-duties). Each admin's session cookie is
+    // captured from their own login response and forwarded on their own
+    // follow-up request, since sequential test calls don't share cookies
+    // automatically.
+    $sessionCookieName = config('session.cookie');
+
+    $verifierCookie = loginAndCaptureSessionCookie($verifier->email, 'password');
+    $this->withUnencryptedCookie($sessionCookieName, $verifierCookie)
+        ->postJson("/api/v1/admin/dsar/{$dsar->id}/verify-identity")
         ->assertStatus(200);
+
+    // Laravel's auth guard is a singleton bound for the lifetime of this
+    // test process, not recreated per simulated request — so a second
+    // login attempt without first logging out would be silently
+    // redirected away by the 'guest' middleware, which would still think
+    // $verifier is logged in. A real POST /logout closes that session for
+    // real before the second admin logs in, exactly as it would have to
+    // in an actual two-admin browser workflow.
+    $this->withUnencryptedCookie($sessionCookieName, $verifierCookie)
+        ->postJson('/logout')
+        ->assertOk();
 
     Http::fake(['connector.example.test/*' => Http::response('', 200)]);
 
-    $this->actingAs($approver)->postJson("/api/v1/admin/dsar/{$dsar->id}/approve-erasure")
+    $approverCookie = loginAndCaptureSessionCookie($approver->email, 'password');
+    $this->withUnencryptedCookie($sessionCookieName, $approverCookie)
+        ->postJson("/api/v1/admin/dsar/{$dsar->id}/approve-erasure")
         ->assertStatus(200);
 
     $task = DsarConnectorTask::query()->where('dsar_request_id', $dsar->id)->firstOrFail();

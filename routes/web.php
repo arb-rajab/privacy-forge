@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -20,7 +21,22 @@ use Inertia\Inertia;
 | exact signature minted for that API path is what gets validated —
 | see DsarStatus.vue.
 |
+| Login/logout (R-05, 10-risk-register.md) live here rather than under
+| /api/v1 — they're an Inertia page + session-bootstrap concern, not part
+| of the versioned JSON API contract in docs/architecture/openapi.yaml.
+| 'guest'/'auth' are Laravel's own default middleware aliases ('auth' is
+| already used on the admin group in routes/api.php).
+|
 */
+
+Route::get('/login', [AuthenticatedSessionController::class, 'create'])
+    ->middleware('guest')
+    ->name('login');
+Route::post('/login', [AuthenticatedSessionController::class, 'store'])
+    ->middleware('guest');
+Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
+    ->middleware('auth')
+    ->name('logout');
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [

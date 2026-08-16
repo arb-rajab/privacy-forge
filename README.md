@@ -56,10 +56,10 @@ a stranger can self-host this and complete a full cycle starting from
 this README alone. It assumes the Quickstart above is already done
 (containers healthy, migrations run).
 
-**0. One-time bootstrap.** There is no seeder yet (tracked as R-02 in
+**0. One-time bootstrap.** There is no seeder yet for consent
+purposes/policies/connectors (tracked as R-02 in
 [`docs/project-memory/10-risk-register.md`](docs/project-memory/10-risk-register.md)) —
-a fresh instance has no consent purpose, no active ABAC policies, and no
-staff users. Run this once:
+a fresh instance has none of those. Run this once:
 
 ```bash
 docker compose exec app php artisan tinker
@@ -74,14 +74,24 @@ $purpose->update(['current_notice_id' => $notice->id]);
 \App\Models\PolicyDefinition::create(['action_name' => 'dsar.erasure.approve', 'version' => 1, 'subject_conditions' => ['role' => ['in' => ['owner', 'privacy_manager']], 'id' => ['not_equals_attribute' => 'resource.identity_verified_by']], 'resource_conditions' => ['status' => ['in' => ['in_progress']], 'request_type' => ['in' => ['erasure']]], 'environment_conditions' => [], 'effect' => 'allow', 'status' => 'active']);
 \App\Models\Connector::create(['name' => 'Demo Connector', 'webhook_url' => 'https://example.test/webhook', 'secret_hash' => str()->random(40), 'status' => 'active', 'registered_at' => now()]);
 
-$verifier = \App\Models\User::create(['name' => 'Admin One', 'email' => 'admin1@example.test', 'password' => bcrypt('password'), 'role' => 'owner', 'active' => true]);
-$approver = \App\Models\User::create(['name' => 'Admin Two', 'email' => 'admin2@example.test', 'password' => bcrypt('password'), 'role' => 'owner', 'active' => true]);
-
 echo "purpose id: {$purpose->id}\n";
 ```
 
 Copy the printed purpose id — you'll need it in step 1. `exit` tinker
 when done.
+
+**Staff accounts, unlike the above, do not need tinker at all** (R-05 in
+`10-risk-register.md`, closed this session — real staff login now exists).
+Create your first Owner account with a dedicated artisan command instead:
+
+```bash
+docker compose exec app php artisan privacy-forge:create-owner --name="Admin One" --email=admin1@example.test --password=a-real-password
+docker compose exec app php artisan privacy-forge:create-owner --name="Admin Two" --email=admin2@example.test --password=a-real-password
+```
+
+(Two accounts, because step 3 below needs a *different* admin to approve
+erasure than the one who verified identity — ADR-0007's
+separation-of-duties.)
 
 **1. Give consent, as the widget's visitor.** Visit
 `http://localhost:8000/embed-example.html?purposeId=<purpose id>` — a
@@ -95,40 +105,30 @@ a status page — bookmark that URL; it's the only way back in (no
 account, per `docs/project-memory/05-api-contracts.md`'s auth model).
 It will show `pending_verification`.
 
-**3. Act as your own admin.** There's no staff login page yet (a gap
-this session surfaced — see
-[`docs/project-memory/12-session-handoff.md`](docs/project-memory/12-session-handoff.md)),
-so verifying identity and approving erasure — normally a staff member's
-job — is done here directly against the same authorisation-gated
-controllers a login-backed session would call, via tinker:
+**3. Act as your own admin — for real, no shell access.** Visit
+`http://localhost:8000/login` and log in as `admin1@example.test`
+(**Admin One**, the identity verifier). There is no admin dashboard yet
+with dedicated verify/approve buttons (`01-scope-and-non-goals.md` still
+lists "a richer admin dashboard" as backlog), so those two actions are
+called directly against the JSON API a real admin client would call —
+but authenticated by the real, logged-in browser session you just
+created. With the same browser tab open, open its DevTools console
+(F12) and paste, substituting the DSAR id from your bookmarked status
+page's URL:
 
-```bash
-docker compose exec app php artisan tinker
+```js
+const csrfToken = JSON.parse(document.getElementById('app').dataset.page).props.csrfToken;
+await fetch('/api/v1/admin/dsar/<dsar-id>/verify-identity', {
+  method: 'POST',
+  headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken },
+});
 ```
 
-```php
-$dsar = \App\Models\DsarRequest::latest()->first();
-$verifier = \App\Models\User::where('email', 'admin1@example.test')->first();
-$approver = \App\Models\User::where('email', 'admin2@example.test')->first();
-$request = \Illuminate\Http\Request::create('/');
-
-$request->setUserResolver(fn () => $verifier);
-app(\App\Http\Controllers\Admin\DsarController::class)->verifyIdentity($request, $dsar->id);
-
-\Illuminate\Support\Facades\Http::fake(['example.test/*' => \Illuminate\Support\Facades\Http::response('', 200)]);
-$request->setUserResolver(fn () => $approver);
-app(\App\Http\Controllers\Admin\DsarController::class)->approveErasure($request, $dsar->id);
-
-$task = \App\Models\DsarConnectorTask::where('dsar_request_id', $dsar->id)->first();
-$connector = $task->connector;
-$signer = app(\App\Services\ConnectorSignatureService::class);
-$timestamp = (string) now()->timestamp;
-$body = json_encode(['status' => 'success']);
-$callback = \Illuminate\Http\Request::create("/api/v1/connector-callback/{$task->id}", 'POST', ['status' => 'success']);
-$callback->headers->set('X-Connector-Signature', $signer->sign($connector->secret_hash, $timestamp, $body));
-$callback->headers->set('X-Connector-Timestamp', $timestamp);
-app(\App\Http\Controllers\ConnectorCallbackController::class)->handle($callback, $task->id);
-```
+Then log out (click **Log out** on the `/` page) and log back in as
+`admin2@example.test` (**Admin Two**) — ADR-0007 requires a *different*
+admin to approve erasure than the one who verified identity — and paste
+the same snippet again with `approve-erasure` in place of
+`verify-identity`.
 
 **4. Check completion.** Reload your bookmarked status page from step 2
 — it now shows `complete` and the deletion certificate.
@@ -137,11 +137,15 @@ app(\App\Http\Controllers\ConnectorCallbackController::class)->handle($callback,
 it remembers your consent via `localStorage`) and click **Withdraw
 consent**.
 
-Steps 1, 2, 4, and 5 are exactly what a real visitor and a real
-self-hoster would do in a browser; step 3's tinker snippet is a
-documented stand-in for the staff login UI this project doesn't have
-yet, calling the identical `PolicyEvaluator`-gated, audit-logged
-controller code a real session would.
+Every step above, including step 3, is now something a real visitor and
+a real self-hoster do through a real browser session — no tinker, no
+shell access to application code anywhere in this walkthrough. The one
+remaining rough edge is that verify-identity/approve-erasure have no
+dedicated buttons yet (no admin dashboard), so step 3 calls the JSON API
+directly rather than clicking through a page — but the *authentication*
+behind that call is the real thing: `POST /login`, a real session
+cookie, real CSRF, real rate-limited attempts (see
+`docs/project-memory/10-risk-register.md`, R-05).
 
 ## Documentation
 

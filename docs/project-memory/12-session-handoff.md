@@ -7,295 +7,295 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 13 — Part A: risk-register
-  corrections (R-02 re-scope, R-04 added); Part B: embeddable consent
-  widget + public DSAR portal UI (closes Success Metric #1)**
-- Objective: (A) verify R-02's seeder gap covers the current 5 registered
-  policies (not just the original 1) and correct its wording; add R-04 to
-  track ADR-0003's unimplemented external chain-anchor. (B) build the
-  last MVP-boundary UI gap — an embeddable consent widget and a public
-  DSAR intake/status portal — and prove the actual consent → withdrawal →
-  DSAR → export/erasure cycle end-to-end in a real browser, not just "the
-  pages render."
-- Status: **complete, not yet pushed** — 150/150 pre-existing tests still
-  passing (no regressions, no new backend tests — this session added no
-  new PHP business logic beyond two Vue pages' worth of routes), plus a
-  new real end-to-end browser test (`tests/Browser/DsarLifecycleTest.php`,
-  1 test/14 assertions) passing reliably across repeated runs.
-  `vendor/bin/pint --test` clean (140 files), `vendor/bin/phpstan analyse`
-  (Larastan level 8) clean, `npm run lint` clean, `npm run build` clean
-  (both the main app bundle and the new standalone widget bundle),
-  `docs/architecture/openapi.yaml` re-validated (`openapi_spec_validator`,
-  throwaway `python:3.12-slim` container — OK). No new migrations this
-  session, so no rollback-parity check applies.
+- Session number and title: **Session 14 — Staff Authentication**
+- Objective: build real session-based staff login/logout (R-05,
+  `10-risk-register.md`) — the highest-priority open gap identified at
+  Session 13: no real HTTP session could ever be established as a staff
+  user, only Pest's `actingAs()` test shortcut or shell access via
+  `php artisan tinker`. This blocked genuine use of the product and left
+  T-11 (session hijacking), T-12 (CSRF), and T-13 (login brute force)
+  untested against anything real.
+- Status: **complete, not yet pushed** — 157/157 tests pass (152
+  pre-existing + 5 new in `LoginRateLimitTest.php` + 2 new in
+  `CsrfProtectionTest.php`, `DsarLifecycleTest.php` updated in place, plus
+  a new `StaffLoginUiTest.php`), `tests/Browser` (3 tests) passing
+  reliably across repeated runs. `composer lint` clean (145 files),
+  `composer analyse` (Larastan level 8) clean, `npm run lint` clean,
+  `npm run build` clean. `docs/architecture/openapi.yaml` re-validated
+  (`openapi_spec_validator`, throwaway `python:3.12-slim` container) — OK,
+  unchanged (the `staffAuth` cookie scheme it already documented now
+  corresponds to a real login flow, not just a documented intent). No new
+  migrations this session — `App\Models\User` and its table already
+  existed (see correction below) — so no rollback-parity check applies.
 
-## Part A — risk-register corrections
+## Important correction to this session's own brief
 
-1. **R-02 re-verified, not just re-asserted.** Confirmed this session,
-   directly: `database/seeders/` is an empty, untracked directory (`git
-   ls-files database/seeders` returns nothing, no `DatabaseSeeder.php`
-   anywhere), and the only place any of the 5 registered
-   `PolicyDefinition` rows are constructed is
-   `database/factories/PolicyDefinitionFactory.php` — test-only, never
-   invoked outside `tests/`. R-02's description already named all 5
-   actions as of Session 12; this session's contribution is confirming
-   that scope is still accurate (0 of 5 covered) and adding an explicit
-   re-verification note so a future session doesn't have to re-derive it.
-2. **R-04 added**, tracking ADR-0003's external chain-anchoring — never
-   implemented, only the hash-chain and DB-grant (R-01) layers exist.
-   ADR-0003 itself anticipated "chain-only" as an accepted, weaker
-   degraded state, so this is a known, designed-for gap, not a surprise —
-   but per the brief, it needed to be tracked rather than forgotten.
-   Grouped with R-02 and the Demo Instance Data Safety controls as
-   deployment-phase (Session 8) work. **Not implemented this session**,
-   per explicit instruction.
+The brief for this session assumed `App\Models\User` did not exist yet
+("finally creating the model config/auth.php has referenced since
+Session 5"). **That was already stale.** `app/Models/User.php`, its
+migration (`2026_08_14_000001_create_users_table.php`), and
+`database/factories/UserFactory.php` all already existed before this
+session — used throughout `AuthorisationMatrixTest.php`,
+`PolicyManagementTest.php`, and every other `actingAs()`-based test.
+Confirmed directly: the `role` column is exactly the three lowercase
+strings (`owner`/`privacy_manager`/`support_staff`) every registered
+`PolicyDefinition` and `PolicyEvaluator::evaluate()` already compares
+against — no changes were needed to the model, its role representation,
+or any policy definition. What was actually missing, confirmed by
+searching the whole codebase for any call to `Auth::login()` or a login
+route/view, was exactly what Session 13's own handoff had already flagged
+as a finding: no controller, route, or view anywhere ever established a
+real session. This session built that layer, and that layer only.
 
-Neither R-01 nor any ADR was touched.
+## What was built
 
-## Part B — embeddable consent widget + public DSAR portal
+### Real login/logout — `App\Http\Controllers\Auth\AuthenticatedSessionController`
 
-### Widget: a standalone Vite library build, not an Inertia page
+- `GET /login` → renders `Login.vue` (Inertia), matching the plain
+  `fetch()`-based house style already established by `DsarSubmit.vue` —
+  no `useForm`, no shared `Layout.vue` component (none existed to reuse).
+- `POST /login` → validates, checks a hand-rolled rate limiter (see
+  below), calls `Auth::attempt()`, regenerates the session on success
+  (T-11), and returns `{redirect: '/'}` as JSON rather than a framework
+  redirect — the frontend does `window.location.href = body.redirect`,
+  identical in shape to `DsarSubmit.vue`'s existing post-submit pattern.
+- `POST /logout` → `Auth::guard('web')->logout()`, then
+  `$request->session()->invalidate()` and `regenerateToken()` (T-11) —
+  full invalidation, not just clearing the guard.
+- **CSRF (T-12)** is *not* handled in this controller at all — it's
+  Laravel's default `ValidateCsrfToken` middleware, already part of the
+  `web` group `bootstrap/app.php` applies, on a route registered in
+  `routes/web.php`. Nothing new needed adding; the job this session was
+  to actually *prove* it, since it had never been tested (see below).
+- `App\Http\Middleware\HandleInertiaRequests` now shares `auth.user`
+  (name/email/role, an explicit allow-list) and `csrfToken` globally, so
+  any Inertia page can render logged-in state and make an authenticated
+  `fetch()` POST. `Welcome.vue` now shows "Logged in as X (role) — Log
+  out" or a "Staff login" link depending on that shared prop.
 
-`resources/js/widget/` (`ConsentWidget.vue`, `main.js`), built by a
-**second, independent Vite config** (`vite.widget.config.js`, library
-mode, IIFE, fixed filename) to `public/widget.js` — deliberately not
-routed through `laravel-vite-plugin`'s manifest-hashed pipeline, which
-only serves pages this app itself renders. `npm run build` now runs both
-configs; `npm run build:widget` runs just the widget. Full rationale in
-`09-decision-log.md`.
+### Rate limiting (T-13) — a real bug found in `RateLimiter::hit()`
 
-Proven genuinely embeddable, not just built that way: `public/
-embed-example.html` is a plain static HTML file with zero Blade/Inertia
-involvement — a stand-in for a real third-party page — and the E2E test
-drives it with a real headless browser.
+The first implementation used `Illuminate\Support\Facades\RateLimiter`
+with a decay argument that grows per failed attempt
+(`2 ** attempts`). **That doesn't work**: `RateLimiter::hit()` stores
+both its hit counter and its lockout timer via `Cache::add()` (set only
+if absent) — so only the *first* call's decay value for a given key ever
+takes effect; every subsequent, larger decay passed on later calls is
+silently ignored. Confirmed by writing the test first and watching it
+fail with `availableIn() === 0` immediately after a lockout the *response
+body itself* correctly reported. Fixed by tracking the lockout deadline
+directly against the cache (`login-attempts:{key}`,
+`login-lockout:{key}`) instead of via that facade — each additional
+failed attempt now genuinely at least doubles the wait (2s, 4s, 8s, ...,
+capped at 5 minutes), and unknown-email vs. wrong-password produce the
+*identical* generic message (`These credentials do not match our
+records.`) either way. All of this is asserted for real in
+`tests/Feature/LoginRateLimitTest.php`, not just implemented.
 
-**Widget deliberately has no client-side persistence** (no
-`localStorage`/cookies) — found mid-session that an earlier draft
-violated `03-architecture.md`'s own component-responsibility table
-("[the widget is] not responsible for... storing anything client-side
-beyond what's needed to render; no local persistence of consent state"),
-written at Session 3. Fixed before this became a real architectural
-drift: withdrawal is offered only for the consent just captured in the
-same page view (a plain Vue ref, gone on reload), not a persisted
-return-visit lookup.
+A second, smaller bug caught by manually smoke-testing the live dev
+server with `curl` (not just the test suite): the lockout message
+originally interpolated `now()->diffInSeconds($lockedUntil)` directly,
+which can return a float (`"Please try again in 1.563979 seconds."`) —
+fixed with `(int) ceil(...)`.
 
-### DSAR portal: reuses the existing signed link, invents nothing
+### CSRF (T-12) — proving it, not assuming it
 
-`resources/js/Pages/DsarSubmit.vue` (`/dsar`) and `DsarStatus.vue`
-(`/dsar/status/{signedToken}`), both plain Inertia pages matching
-`Welcome.vue`'s existing convention. Neither the `POST /api/v1/dsar` nor
-`GET /api/v1/dsar/status/{signedToken}` contracts changed at all. The
-status page's own route does not re-check the signature — it forwards
-`signedToken` plus whatever query string it was loaded with straight to
-the real, unchanged API path client-side, so the exact signature minted
-by `DsarController::submit` is what actually gets validated. Full
-reasoning in `09-decision-log.md`.
+Laravel's CSRF middleware (`VerifyCsrfToken`/`ValidateCsrfToken`) has a
+built-in escape hatch: `runningUnitTests()` skips verification entirely
+whenever `app()->runningUnitTests()` is true — which is the case for
+*every* ordinary Pest test in this suite, including every pre-existing
+`actingAs()->postJson()` call. That means simply asserting "the admin
+route works" proves nothing about CSRF at all — a genuinely unprotected
+route would have passed every existing test unchanged.
+`tests/Feature/CsrfProtectionTest.php` defeats that escape hatch (by
+rebinding the container's `'env'` value away from `'testing'` for its own
+tests only) so the real `tokensMatch()`/`getTokenFromRequest()` logic
+runs against a real admin route (`PATCH /api/v1/admin/policies/{id}`):
+one test proves a request without a token is rejected (419) even from an
+otherwise-authenticated session; the other proves the identical request
+succeeds once the real session's own CSRF token is attached. **Also
+manually verified against the actual running dev server** with `curl`
+(not the test harness at all) — a request missing `X-CSRF-TOKEN` got a
+real `419 CSRF token mismatch`, confirming the mechanism holds outside
+Pest's world too.
 
-`DsarSubmit.vue` rewrites the API's raw `status_url` (`/api/v1/dsar/
-status/{token}?...`) to the friendly page path (`/dsar/status/{token}?...`,
-same query string) and navigates there on success — a UX improvement to
-where a human lands, not a contract change.
+### The bootstrapping problem — `php artisan privacy-forge:create-owner`
 
-### The actual proof: `tests/Browser/DsarLifecycleTest.php`
+A fresh instance needs an Owner to log in as, but creating a user
+normally requires being logged in already. Solved the same way
+`RegisterReferenceConnectorCommand` solved the analogous connector
+bootstrap problem: an artisan command
+(`app/Console/Commands/CreateOwnerCommand.php`), not direct DB
+manipulation. Prompts for name/email/password if not passed as options,
+validates (unique email, min-length password), creates the `User` row
+with `role: 'owner'`. Manually verified end-to-end against the live dev
+server: ran the command, then logged in through the real `/login` page
+with the exact credentials it printed.
 
-New dependency: **`pestphp/pest-plugin-browser`** (`^4.3`), not raw
-Playwright or Dusk — chosen specifically because its `LaravelHttpServer`
-driver dispatches every browser-originated request through the *same*
-in-process application instance the rest of a Pest test runs in,
-including carrying a plain `$this->actingAs($user)` session into the
-browser automatically. That mattered concretely: **there is no staff
-login UI** (see finding below), so the test's admin verify/approve steps
-are ordinary `actingAs()->postJson()` calls sharing the same
-`RefreshDatabase` transaction as the browser-driven steps — not a
-separate, harder-to-build HTTP session bridge. Full choice rationale,
-including why this over Dusk/raw Playwright, in `09-decision-log.md`.
+### `tests/Browser/DsarLifecycleTest.php` — the actual proof
 
-The test drives the actual Success-Metric-1 cycle: gives consent via the
-widget on a plain third-party-style static page → submits an erasure DSAR
-via the public portal → an admin verifies identity and a *different*
-admin approves erasure (ADR-0007 separation-of-duties) → a real
-connector callback (HMAC-signed, matching `ConnectorDispatchTest.php`'s
-existing pattern) completes it → the visitor's bookmarked status page
-shows `complete` and the deletion certificate → the visitor withdraws
-consent on the original widget page. Asserts real data-level outcomes
-(`ConsentRecord.status`, `DsarRequest.status`, certificate existence),
-not just that pages render.
+Act 3 (admin verify-identity/approve-erasure) previously used
+`$this->actingAs($verifier)->postJson(...)` — a pure test shortcut that
+sets the auth guard directly and was never proof a real HTTP session
+could be established at all. It now calls the real `POST /login`
+endpoint for each admin and forwards the *actual* session cookie the
+server issued on subsequent calls (Laravel's test HTTP client does not
+carry cookies between separate `$this->call()`-based requests
+automatically, unlike a real browser — so this is done by hand, exactly
+mirroring what a browser does invisibly).
 
-**Two real bugs found and fixed by actually running this test
-repeatedly, not by inspection** — full detail in `09-decision-log.md`:
-1. `pestphp/pest-plugin-browser`'s own cleanup crashes without the
-   `pcntl` PHP extension (references the bare `SIGTERM` constant
-   unconditionally). Added `pcntl` to `docker/Dockerfile` and the new
-   `e2e` CI job's PHP extensions list.
-2. The widget silently failed to mount in a real browser
-   ("`process is not defined`") — Vite's library mode skips its usual
-   default of replacing `process.env.NODE_ENV`, which Vue's
-   bundler-targeted build checks at runtime. A smoke test that only
-   checked for static page text passed while the actual widget was dead
-   — exactly why the brief asked for a real browser test. Fixed with an
-   explicit `define` in `vite.widget.config.js` (also shrank
-   `widget.js` from ~105 KB to ~69 KB via better tree-shaking).
+**A second real bug found by doing this for real, not by inspection:**
+Laravel's `AuthManager` caches the resolved guard instance for the
+lifetime of the test process (not per simulated request), and
+`SessionGuard::user()` short-circuits (`if (!is_null($this->user)) return
+$this->user;`) once resolved — meaning a second login attempt within the
+*same* test, without an explicit logout first, was silently redirected
+away by the `guest` middleware, which still thought the first admin was
+logged in, regardless of which session cookie the second request
+carried. Fixed by calling the real `POST /logout` endpoint between the
+two admins' logins — which also means this test now exercises logout for
+real too, not just login.
 
-### Finding: no staff login mechanism exists anywhere in this application
-
-Discovered while designing the E2E test's admin steps, not assumed —
-`05-api-contracts.md` documents session-based `staffAuth`, and every
-admin controller correctly checks `$request->user()`, but no controller,
-route, or view anywhere calls `Auth::login()` or renders a login form.
-The only place a staff session is ever established is Pest's
-`actingAs()` test helper. Concretely: **today, a real browser with real
-credentials cannot become an authenticated staff session at all** — this
-is a materially more fundamental gap than "richer admin dashboard" in
-`11-backlog.md` (which implies a dashboard is merely undecorated). Not
-fixed this session — building a login system is a new feature, out of
-scope for "consent widget + DSAR portal UI." The README's walkthrough
-documents the honest workaround (calling the gated controllers directly
-via `tinker`, still going through the real `PolicyEvaluator` gate) rather
-than pretending a login flow exists.
+**`tests/Browser/StaffLoginUiTest.php` (new)** is the complement:
+`DsarLifecycleTest.php`'s real logins call the endpoint directly
+(`postJson`), never `Login.vue`'s own form. This test drives a real
+Playwright browser typing into and submitting the actual login page,
+then clicking the real "Log out" link `Welcome.vue` now renders — the
+one thing the other test doesn't cover.
 
 ### README rewrite
 
-`README.md` had not been updated since Session 5 (still read "Session 5
-complete, no features implemented yet" despite 7 sessions of real
-feature work) — this undermined Success Metric #1 categorically, since a
-stranger reading it would have no idea any of this existed. Rewrote the
-status line and feature summary, and added a full numbered "Try it"
-walkthrough covering the real 15-minute cycle, including the one-time
-policy/purpose bootstrap tinker snippet (R-02) and the admin-step tinker
-workaround (no login UI, above).
+Removed the tinker-based admin-action workaround entirely. Staff-account
+bootstrap now uses `php artisan privacy-forge:create-owner` (still no
+seeder for consent purposes/policies/connectors — that's R-02, untouched,
+so that one bootstrap step still uses tinker, honestly labelled as such).
+Step 3 of the walkthrough now instructs a real `/login` visit, then
+(since there's still no admin dashboard with dedicated verify/approve
+buttons — that remains backlog, not this session's job) a small
+browser-DevTools-console `fetch()` snippet to call the two admin
+endpoints, authenticated by the real session cookie already in that same
+browser tab. No shell access to application code anywhere in the
+documented path.
 
 ## What was explicitly NOT done this session, and why
 
-1. **R-01 — untouched**, per ground rules (not trivially resolved as a
-   side effect).
-2. **No ADR reopened.** The widget's client-side-persistence removal
-   restored compliance with an existing `03-architecture.md` table, it
-   didn't change the table itself.
-3. **The audit-log external chain-anchor (R-04) was not implemented** —
-   tracked only, per explicit instruction.
-4. **No staff login UI built** — see the finding above; out of scope for
-   this session's stated objective.
-5. **The seeder itself (R-02) was not built** — the README's tinker
-   bootstrap is a documented, honestly-labelled stand-in, not a fix.
+1. **R-01 and R-04 — untouched**, per ground rules.
+2. **No ADR reopened.** Staff auth didn't need to interact with
+   `PolicyEvaluator` in any new way — controllers already called
+   `$request->user()` correctly; wiring real login was a drop-in.
+3. **R-02 (seeder gap) — untouched.** The README's one remaining tinker
+   step (consent purpose/policy/connector bootstrap) is unrelated to
+   staff auth and still honestly labelled as a workaround.
+4. **No admin dashboard built.** Verify-identity/approve-erasure still
+   have no dedicated UI buttons (`01-scope-and-non-goals.md`'s "richer
+   admin dashboard" backlog item, unchanged) — the README's step 3 and
+   `DsarLifecycleTest.php`'s Act 3 both call the JSON API directly,
+   authenticated by a *real* session rather than a test shortcut, which
+   was this session's actual scope.
+5. **No password reset flow.** Not asked for; `config/auth.php`'s
+   `passwords.users` config and the `password_reset_tokens` table remain
+   unbuilt — a future gap if self-service password reset is ever wanted,
+   not tracked as a risk-register entry since nothing depends on it yet.
 
 ## Files created or changed
 
-**Frontend:** `resources/js/widget/ConsentWidget.vue` (new),
-`resources/js/widget/main.js` (new), `resources/js/Pages/DsarSubmit.vue`
-(new), `resources/js/Pages/DsarStatus.vue` (new), `resources/js/Pages/
-Welcome.vue` (nav links added), `vite.widget.config.js` (new),
-`public/embed-example.html` (new).
+**Backend:** `app/Http/Controllers/Auth/AuthenticatedSessionController.php`
+(new), `app/Console/Commands/CreateOwnerCommand.php` (new),
+`app/Http/Middleware/HandleInertiaRequests.php` (shares `auth.user` and
+`csrfToken`), `routes/web.php` (`/login`, `/logout`).
 
-**Routes:** `routes/web.php` (`/dsar`, `/dsar/status/{signedToken}`).
+**Frontend:** `resources/js/Pages/Login.vue` (new, matches
+`DsarSubmit.vue`'s house style), `resources/js/Pages/Welcome.vue`
+(logged-in/out state, logout link).
 
-**Build/tooling:** `package.json` (`build:widget` script, `build` now
-runs both configs, new `playwright` devDependency required by the E2E
-test tooling below), `package-lock.json`.
+**Testing:** `tests/Feature/LoginRateLimitTest.php` (new, 5 tests),
+`tests/Feature/CsrfProtectionTest.php` (new, 2 tests),
+`tests/Browser/DsarLifecycleTest.php` (Act 3 rewritten to use real
+login), `tests/Browser/StaffLoginUiTest.php` (new, 2 tests).
 
-**Testing:** `tests/Browser/DsarLifecycleTest.php` (new), `tests/Pest.php`
-(binds `Browser` directory), `composer.json` (new
-`pestphp/pest-plugin-browser` dev dependency, `test:e2e` script,
-`process-timeout: 900` — Pest Browser Testing's cold-start genuinely
-exceeds Composer's 300s default on this machine).
-
-**Infrastructure:** `docker/Dockerfile` (`pcntl`/`sockets` PHP
-extensions, Node.js 20, `npm ci` + `npx playwright install --with-deps
-chromium` — all dev-image-only, per the file's own existing "not a
-production artifact" framing), `docker-compose.yml` (`node_modules`
-anonymous volume on `app`, matching the existing `vendor` pattern),
-`.github/workflows/ci.yml` (new `e2e` job).
-
-**Docs:** `README.md` (rewritten — see above), `CONTRIBUTING.md`
-(`composer test:e2e` documented), `docs/project-memory/
-10-risk-register.md` (R-02 re-verified, R-04 added),
-`docs/project-memory/09-decision-log.md` (5 new entries: widget
-architecture, status-page signed-link reuse, Pest Browser Testing
-choice, the two bugs found/fixed, the no-staff-login finding),
-`docs/project-memory/07-testing-strategy.md` (new "End-to-end / browser
-testing" section), `docs/project-memory/01-scope-and-non-goals.md` (MVP
-boundary checklist re-checked item-by-item — see below), this file.
+**Docs:** `README.md` (tinker admin-action workaround removed,
+create-owner + real login steps added), `docs/project-memory/
+10-risk-register.md` (R-05 added and closed in the same session),
+`docs/project-memory/06-security-threat-model.md` (T-11's "Verified by"
+column now points at a real test instead of "Manual config review,
+Session 5"), this file.
 
 ## Validation performed
 
-- `docker compose exec app vendor/bin/pest` → **150/150 passed** (no
-  regressions; this session added no new backend business logic).
-- `docker compose exec app vendor/bin/pest tests/Browser` →
-  **1/1 passed (14 assertions)**, run twice to confirm stability
-  (18.55s and 12.33s) after both bugs above were fixed.
-- `vendor/bin/pint --test` → clean, 140 files.
-- `vendor/bin/phpstan analyse --memory-limit=1G` (Larastan level 8) →
-  no errors.
-- `npm run lint` → clean.
-- `npm run build` → both configs succeed (`public/build/` and
-  `public/widget.js`).
+- `docker compose exec app composer test` → **157/157 passed** (640
+  assertions).
+- `docker compose exec app composer test:e2e` → **3/3 passed** (23
+  assertions) — `DsarLifecycleTest` re-run twice for stability, once
+  alongside `StaffLoginUiTest`.
+- `composer lint` (Pint) → clean, 145 files.
+- `composer analyse` (Larastan level 8) → no errors.
+- `npm run lint` (ESLint) → clean (one auto-fixed formatting warning in
+  `Welcome.vue`).
+- `npm run build` → both configs succeed.
 - `docs/architecture/openapi.yaml` validated with
-  `openapi_spec_validator` (throwaway `python:3.12-slim` container) →
-  **OK**. No changes were needed — no API contract changed this session.
+  `openapi_spec_validator` → **OK**, unchanged (no new endpoint added —
+  login/logout are session-bootstrap concerns outside the versioned
+  `/api/v1` JSON contract the spec documents, same reasoning
+  `05-api-contracts.md` already uses for why `staffAuth` describes the
+  cookie mechanism generically rather than a specific endpoint).
+- **Manually smoke-tested against the actual running dev server**
+  (`docker compose up`'s `app` container on :8000), *outside* the Pest
+  test harness entirely, with `curl`: bootstrapped an Owner via the
+  artisan command, fetched `/login` and extracted the real CSRF token
+  from the rendered page, confirmed a request without it gets a real
+  `419`, confirmed wrong-password gives the generic message, confirmed
+  correct credentials log in and `GET /` then shares
+  `auth.user.role: "owner"`, confirmed `POST /logout` clears it back to
+  `null`. This is what caught both the `RateLimiter::hit()` decay bug and
+  the float-seconds message bug — the automated test suite alone did not
+  surface either until this manual pass.
 - No new migrations — rollback-parity check not applicable.
-- **Not yet pushed** — awaiting confirmation before push, matching the
-  established pattern from prior sessions.
+- **Not yet pushed** — awaiting confirmation before push, per this
+  project's established pattern.
 
-## MVP-completeness check (re-run against the actual codebase)
+## Success Metric #1 — re-checked explicitly
 
-Checked `01-scope-and-non-goals.md`'s MVP boundary checklist item-by-item
-again. **Verdict: 7 of 9 items are genuinely complete** (up from 5 at
-Session 12); the remaining 2 are independent, narrower gaps rather than
-a single shared root cause:
-
-| # | Item | Status |
-|---|---|---|
-| 1 | Consent registry | ✅ Complete (widget added this session) |
-| 2 | DSAR | ✅ Complete (portal added this session) |
-| 3 | Retention policies | ✅ Complete |
-| 4 | RoPA register with export | ✅ Complete |
-| 5 | Tamper-evident audit log | Hash chain complete; **no periodic external anchor (R-04)** |
-| 6 | ABAC authorisation | ✅ Complete |
-| 7 | Single organisation per instance | ✅ Complete |
-| 8 | GDPR/UK-GDPR only | ✅ Complete |
-| 9 | Public demo instance | **Not done** — no seeders (R-02) |
-
-**The Success Metric #1 walkthrough is now functionally completable**,
-but with an honest asterisk: it requires the one-time tinker bootstrap
-(R-02, no seeder) and a tinker-based admin-action workaround (no staff
-login UI, a new finding this session — see above). Whether a genuinely
-*naive* stranger (as opposed to the technical-founder persona the
-project brief targets) could complete it unassisted in the 15-minute
-window is a judgment call, not something this session can assert as a
-pass — flagged explicitly rather than claimed. A stopwatch-timed run by
-an actual third party, not just functional completeness, is the honest
-next check if this metric needs to be certified rather than just
-plausible.
-
-The project is closer to MVP-complete than at any prior session but
-still cannot be credibly tagged v1.0.0 per its own Definition — R-02 and
-R-04 remain, and Success Metric #1's "under 15 minutes" claim has not
-been independently timed.
+**Not fully met yet, and here's exactly what's still missing.** A
+stranger can now complete consent → withdrawal → DSAR erasure →
+completion *without any shell access* — real login replaces the tinker
+workaround for the admin half. But the walkthrough is not yet purely
+click-driven for a non-technical stranger: step 3 (verify identity,
+approve erasure) still requires pasting a small JavaScript snippet into
+the browser's DevTools console, because no admin UI exists yet with
+actual verify/approve buttons (`01-scope-and-non-goals.md`'s "richer
+admin dashboard" backlog item — explicitly out of scope for this
+session, which was staff *authentication*, not an admin *dashboard*).
+That asterisk is smaller than last session's ("requires shell access to
+application code entirely") but it is still real: a strictly non-technical
+person, as opposed to the technical-founder persona the project brief
+targets, would likely need someone to hand them that snippet rather than
+discovering it themselves. The 15-minute timing claim remains
+functionally plausible but not independently stopwatch-verified, same as
+last session.
 
 ## Open questions and risks
 
 - **R-01 — unchanged.**
-- **R-02 — re-verified, still open.** Gap is 0 of 5 policies seeded, no
-  `database/seeders/` content, confirmed this session.
-- **R-04 — new, open.** ADR-0003's external chain-anchor never built.
-- **No staff login mechanism** — new finding this session (see above);
-  not a formal risk-register entry (out of this session's Part A scope),
-  but a real, load-bearing gap worth a future session considering
-  whether it deserves one.
-- **Public demo instance / seeders** — unchanged, still not built.
-- **Success Metric #1's "under 15 minutes" claim** — functionally
-  completable now, but not independently stopwatch-verified, and the
-  admin-step tinker workaround means it's not yet a *pure* browser
-  experience for a non-technical stranger.
+- **R-02 — unchanged, still open.** Consent purpose/policy/connector
+  bootstrap still requires tinker; staff-account bootstrap no longer
+  does (this session's actual scope).
+- **R-04 — unchanged, still open.**
+- **R-05 — closed this session.** See resolution in
+  `10-risk-register.md`.
+- **No admin dashboard** — not a formal risk-register entry (deliberately
+  out of scope, matching `01-scope-and-non-goals.md`'s existing backlog
+  framing), but the direct next step if Success Metric #1 is to become
+  purely click-driven for a genuinely non-technical stranger.
+- **No password reset** — not tracked as a risk; nothing depends on it
+  yet, but worth naming if a future session builds anything that would.
 
 ## Next recommended session
 
-- Proposed session title: **either** the audit-log periodic anchor
-  (R-04, ADR-0003's remaining half) **or** a minimal staff login UI (the
-  new finding this session, which would also make the DSAR admin steps
-  demonstrable through a browser rather than tinker) **or** the
-  demo-instance seeder (R-02) as part of Session 8 deployment prep — all
-  three are now genuine, independent "Must"-adjacent gaps with nothing
-  else blocking them.
+- Proposed session title: **either** a minimal admin dashboard (buttons
+  for verify-identity/approve-erasure, closing the last asterisk on
+  Success Metric #1) **or** the demo-instance seeder (R-02) **or** the
+  audit-log periodic anchor (R-04, ADR-0003's remaining half) — all three
+  are now genuine, independent gaps with nothing else blocking them.
 - Inputs required: `docs/project-memory/12-session-handoff.md` (this
   file), `docs/project-memory/10-risk-register.md` (R-02/R-04),
   `docs/adr/ADR-0003-audit-log-tamper-evidence.md` (if the anchor is
@@ -306,54 +306,53 @@ been independently timed.
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 13
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 14
 complete, **not yet pushed** (awaiting confirmation).
 
-**Current stack:** Laravel 12, Vue 3/Inertia, PostgreSQL, Redis,
-S3-compatible storage, `barryvdh/laravel-dompdf`, **plus
-`pestphp/pest-plugin-browser` (new this session, dev/test-only — real
-browser E2E testing, not a runtime dependency) and Node.js/Chromium in
-the dev Docker image to support it.**
+**Current stack:** unchanged since Session 13 — Laravel 12, Vue 3/Inertia,
+PostgreSQL, Redis, S3-compatible storage, `barryvdh/laravel-dompdf`,
+`pestphp/pest-plugin-browser`. No new dependencies this session.
 
 **Architecture decisions that must not be reversed:** all decisions from
-Sessions 0–12 remain in force. Five new decision-log entries this
-session (widget architecture, status-page link reuse, Pest Browser
-Testing choice, two bug fixes, the no-staff-login finding) — none is an
-ADR, none reverses or extends an existing ADR's trade-off.
+Sessions 0–13 remain in force. No ADR touched or reopened this session —
+staff auth was a drop-in against the existing `App\Models\User` and
+`PolicyEvaluator`, not a redesign of either.
 
 **Implementation state:**
-- Done: everything from Session 12, plus: embeddable consent widget
-  (`public/widget.js`), public DSAR portal (`/dsar`, `/dsar/status/
-  {signedToken}`), a real browser-driven E2E test proving the full
-  consent → withdrawal → DSAR erasure → completion cycle.
+- Done: everything from Session 13, plus: real staff login/logout
+  (`/login`, `/logout`), hand-rolled rate-limited login attempts with
+  exponential backoff and generic error messages, CSRF verified with a
+  real test, `php artisan privacy-forge:create-owner` for bootstrap,
+  `DsarLifecycleTest.php`'s admin steps now authenticate via real login.
 - In progress: nothing mid-flight.
-- **Known gaps to check first:** (1) still no bootstrap/seeder for
-  `PolicyDefinition` rows (R-02); (2) no staff login UI anywhere (new
-  finding); (3) the audit-log external chain-anchor is unbuilt (R-04);
-  (4) no connector is registered by default; (5) Success Metric #1's
-  15-minute claim is functionally plausible but not stopwatch-verified.
-- Not started: the audit-log periodic anchor, a staff login UI, the
-  public demo instance/seeders, connector secret rotation, HTTP
+- **Known gaps to check first:** (1) still no admin dashboard with
+  verify/approve buttons — the direct next step for a fully click-driven
+  Success Metric #1; (2) still no bootstrap/seeder for consent
+  purposes/policies/connectors (R-02); (3) the audit-log external
+  chain-anchor is unbuilt (R-04); (4) no password reset flow; (5) Success
+  Metric #1's 15-minute claim is functionally plausible but not
+  stopwatch-verified.
+- Not started: admin dashboard, the audit-log periodic anchor, the public
+  demo instance/seeders, connector secret rotation, HTTP
   connector-management (deliberately deferred), email/notification
-  delivery for export/certificate readiness (deferred), the
-  `RetentionPolicyController::store` duplicate-active-policy validation
-  gap (Session 12 finding, still open).
+  delivery for export/certificate readiness (deferred), password reset,
+  the `RetentionPolicyController::store` duplicate-active-policy
+  validation gap (Session 12 finding, still open).
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the
-2-new-technology cap (ABAC, ASVS L2) — `pestphp/pest-plugin-browser` is
-dev/test tooling, not a new architectural pattern, and does not count
-against it.
+2-new-technology cap (ABAC, ASVS L2) — nothing this session introduced a
+new architectural pattern or dependency.
 
-**Task for next session (single objective):** the audit-log anchor
-(R-04), a minimal staff login UI, or the demo-instance seeder (R-02) —
-see "Next recommended session" above; the user should confirm which
-before the next session starts.
+**Task for next session (single objective):** a minimal admin dashboard,
+the demo-instance seeder (R-02), or the audit-log anchor (R-04) — see
+"Next recommended session" above; the user should confirm which before
+the next session starts.
 
 **Files to attach or paste:**
 - `docs/project-memory/12-session-handoff.md` (this file)
 - `docs/project-memory/10-risk-register.md` (R-02/R-04)
-- `docs/adr/ADR-0003-audit-log-tamper-evidence.md` (if the anchor is chosen)
+- `docs/adr/ADR-0003-audit-log-tamper-evidence.md` (if the anchor is
+  chosen)
 
-**Ground rules:** Do not change the stack beyond tooling additions
-already made. Do not reopen any existing ADR. R-01/R-02/R-04 remain open
-— do not fold a fix in silently.
+**Ground rules:** Do not change the stack. Do not reopen any existing
+ADR. R-01/R-02/R-04 remain open — do not fold a fix in silently.
