@@ -18,38 +18,20 @@ use Illuminate\Support\Facades\Http;
 // the only request type with a separate "approve" step, matching the
 // brief's own wording ("an admin verifies identity and approves").
 //
-// There is no admin UI yet (01-scope-and-non-goals.md still lists "a
-// richer admin dashboard" as backlog) — the admin verify/approve steps
-// below go through the same JSON API a real admin client would call.
-// As of R-05 (10-risk-register.md), that call is authenticated via a
-// genuine POST /login round-trip (App\Http\Controllers\Auth\
-// AuthenticatedSessionController), not Pest's actingAs() test shortcut —
-// actingAs() sets the auth guard directly and was never proof that a
-// real HTTP session could be established at all. Laravel's test HTTP
-// client does not automatically carry cookies between separate calls
-// within a test, so the session cookie POST /login actually issues is
-// captured and forwarded by hand on the follow-up calls below, exactly
-// as a real browser would do it invisibly. Both this and the
-// browser-driven steps run in the same PHP process against the same
-// RefreshDatabase transaction — Pest Browser Testing's LaravelHttpServer
-// dispatches every browser-originated request through this same
-// application instance, it does not shell out to a separate
-// `php artisan serve` process.
-function loginAndCaptureSessionCookie(string $email, string $password): string
-{
-    $response = test()->postJson('/login', ['email' => $email, 'password' => $password]);
-    $response->assertOk();
-
-    $sessionCookieName = config('session.cookie');
-
-    foreach ($response->headers->getCookies() as $cookie) {
-        if ($cookie->getName() === $sessionCookieName) {
-            return $cookie->getValue();
-        }
-    }
-
-    throw new RuntimeException("Login response did not set the {$sessionCookieName} cookie.");
-}
+// This session (Admin Dashboard) closes the last asterisk Session 14's
+// handoff flagged: Act 3 below drives the real /login page and the real
+// /admin/dsar queue page's own "Verify identity"/"Approve erasure"
+// buttons through an actual Playwright browser — no DevTools console
+// snippet, no postJson()/actingAs() shortcut anywhere in this test. It
+// also drives the same admin attempting to approve their own
+// verification and seeing the real ADR-0007 separation-of-duties denial
+// rendered inline, proving the UI surfaces that ProblemDetail rather
+// than hiding it behind a generic error. Every part of this test — the
+// widget, the DSAR portal, and the admin dashboard — runs in the same
+// PHP process against the same RefreshDatabase transaction: Pest
+// Browser Testing's LaravelHttpServer dispatches every browser-
+// originated request through this same application instance, it does
+// not shell out to a separate `php artisan serve` process.
 test('US-METRIC-1: a fresh visitor completes consent -> DSAR erasure -> admin verify/approve -> status shows completion -> withdrawal', function () {
     PolicyDefinition::factory()->create();
     PolicyDefinition::factory()->forErasureApproval()->create();
@@ -88,37 +70,56 @@ test('US-METRIC-1: a fresh visitor completes consent -> DSAR erasure -> admin ve
         ->firstOrFail();
     expect($dsar->request_type)->toBe('erasure');
 
-    // Act 3 — an admin logs in for real (POST /login, the actual
-    // AuthenticatedSessionController — see R-05) and verifies identity,
-    // then a *different* admin logs in and approves the erasure
-    // (ADR-0007 separation-of-duties). Each admin's session cookie is
-    // captured from their own login response and forwarded on their own
-    // follow-up request, since sequential test calls don't share cookies
-    // automatically.
-    $sessionCookieName = config('session.cookie');
+    // Act 3 — an admin logs in for real through the actual /login page,
+    // opens the real /admin/dsar queue page, and clicks its own "Verify
+    // identity" button. Purely mouse-and-keyboard from here — no
+    // DevTools console, no direct API calls.
+    $adminBrowser = visit('/login')
+        ->type('#email', $verifier->email)
+        ->type('#password', 'password')
+        ->click('Log in')
+        ->assertPathIs('/')
+        ->assertSee('Logged in as');
 
-    $verifierCookie = loginAndCaptureSessionCookie($verifier->email, 'password');
-    $this->withUnencryptedCookie($sessionCookieName, $verifierCookie)
-        ->postJson("/api/v1/admin/dsar/{$dsar->id}/verify-identity")
-        ->assertStatus(200);
+    $adminBrowser->navigate('/admin/dsar')
+        ->assertSee('pending_verification')
+        ->click('Verify identity')
+        ->assertSee('in_progress');
+
+    // The same admin now tries to approve the erasure they just
+    // verified. ADR-0007's separation-of-duties condition denies this —
+    // the UI must show that real ABAC denial, not a generic error.
+    $adminBrowser->navigate('/admin/dsar')
+        ->click('Approve erasure')
+        ->assertSee('dsar.erasure.approve policy denied this request');
 
     // Laravel's auth guard is a singleton bound for the lifetime of this
     // test process, not recreated per simulated request — so a second
     // login attempt without first logging out would be silently
     // redirected away by the 'guest' middleware, which would still think
-    // $verifier is logged in. A real POST /logout closes that session for
-    // real before the second admin logs in, exactly as it would have to
-    // in an actual two-admin browser workflow.
-    $this->withUnencryptedCookie($sessionCookieName, $verifierCookie)
-        ->postJson('/logout')
-        ->assertOk();
+    // $verifier is logged in. Clicking the real "Log out" link
+    // (Welcome.vue) closes that session for real before the second admin
+    // logs in, exactly as it would have to in an actual two-admin
+    // browser workflow.
+    $adminBrowser->navigate('/')
+        ->click('Log out')
+        ->assertPathIs('/login');
 
     Http::fake(['connector.example.test/*' => Http::response('', 200)]);
 
-    $approverCookie = loginAndCaptureSessionCookie($approver->email, 'password');
-    $this->withUnencryptedCookie($sessionCookieName, $approverCookie)
-        ->postJson("/api/v1/admin/dsar/{$dsar->id}/approve-erasure")
-        ->assertStatus(200);
+    // A different admin logs in and approves for real — this time ADR-
+    // 0007's condition is satisfied, since the approver differs from the
+    // identity verifier.
+    $adminBrowser->navigate('/login')
+        ->type('#email', $approver->email)
+        ->type('#password', 'password')
+        ->click('Log in')
+        ->assertPathIs('/');
+
+    $adminBrowser->navigate('/admin/dsar')
+        ->assertSee('in_progress')
+        ->click('Approve erasure')
+        ->assertSee($approver->id);
 
     $task = DsarConnectorTask::query()->where('dsar_request_id', $dsar->id)->firstOrFail();
 

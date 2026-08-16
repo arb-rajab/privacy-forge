@@ -46,6 +46,9 @@ async function logout() {
         — a plain third-party page demonstrating the embeddable widget
         (see README for how to embed it on your own site)
       </li>
+      <li v-if="page.props.auth.user">
+        <a href="/admin/dsar">DSAR queue</a>
+      </li>
     </ul>
   </div>
 </template>

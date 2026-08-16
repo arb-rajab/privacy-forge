@@ -27,15 +27,16 @@ single shared "no frontend" root cause Session 12 found.
       erasure with a verification receipt. **Complete.** US-005–009 backend
       unchanged; the public intake portal (`/dsar`, `/dsar/status/
       {signedToken}`, `resources/js/Pages/DsarSubmit.vue`/`DsarStatus.vue`)
-      is new this session, calling the unchanged `POST /dsar`/`GET /dsar/
-      status/{signedToken}` contracts — see `09-decision-log.md` for how
-      the status page reuses the exact signed link rather than inventing a
-      new endpoint. Identity verification and erasure approval still have
-      no staff-facing UI (see the new finding in `09-decision-log.md`: no
-      staff login mechanism exists anywhere yet), but the DSAR-portal half
-      this item's own wording asks for is real and browser-tested end to
-      end, including a completed erasure with its deletion certificate
-      surfaced back to the data subject.
+      was added Session 13, calling the unchanged `POST /dsar`/`GET /dsar/
+      status/{signedToken}` contracts. Identity verification and erasure
+      approval now also have real staff-facing UI (this session — the
+      Admin Dashboard: `/admin/dsar`, `resources/js/Pages/
+      AdminDsarQueue.vue`), closing the gap the previous two sessions'
+      handoffs both flagged. The whole DSAR-portal-plus-admin-action loop
+      is real and browser-tested end to end, including a completed erasure
+      with its deletion certificate surfaced back to the data subject, and
+      a genuine ADR-0007 separation-of-duties denial rendered in the UI
+      when the same admin who verified identity tries to approve.
 - [x] Retention policies: per-data-category rules, dry-run preview,
       scheduled execution, deletion certificates. Complete (Session 11:
       US-010/011/012; Session 12 fixed a real re-selection bug in

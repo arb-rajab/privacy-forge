@@ -51,3 +51,15 @@ Route::get('/dsar', function () {
 Route::get('/dsar/status/{signedToken}', function (string $signedToken) {
     return Inertia::render('DsarStatus', ['signedToken' => $signedToken]);
 });
+
+// Admin DSAR queue (this session) — a UI shell around the unchanged
+// Admin\DsarQueueController / Admin\DsarController JSON API
+// (docs/architecture/openapi.yaml's "Admin — DSAR Queue" /
+// "Admin — Purposes and Policies" tags), matching the DSAR portal
+// routes' own shape above. 'auth' redirects an unauthenticated visitor
+// to /login rather than rendering a page whose first fetch() would just
+// 401 (DsarQueueController::index() already aborts 401 as a backstop,
+// but a signed-out visitor should never reach the page at all).
+Route::get('/admin/dsar', function () {
+    return Inertia::render('AdminDsarQueue');
+})->middleware('auth');

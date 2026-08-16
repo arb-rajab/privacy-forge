@@ -105,47 +105,44 @@ a status page — bookmark that URL; it's the only way back in (no
 account, per `docs/project-memory/05-api-contracts.md`'s auth model).
 It will show `pending_verification`.
 
-**3. Act as your own admin — for real, no shell access.** Visit
+**3. Act as your own admin — for real, buttons only.** Visit
 `http://localhost:8000/login` and log in as `admin1@example.test`
-(**Admin One**, the identity verifier). There is no admin dashboard yet
-with dedicated verify/approve buttons (`01-scope-and-non-goals.md` still
-lists "a richer admin dashboard" as backlog), so those two actions are
-called directly against the JSON API a real admin client would call —
-but authenticated by the real, logged-in browser session you just
-created. With the same browser tab open, open its DevTools console
-(F12) and paste, substituting the DSAR id from your bookmarked status
-page's URL:
+(**Admin One**, the identity verifier). From `/`, click **DSAR queue**,
+find your request, and click **Verify identity**. Its status changes to
+`in_progress` right there on the page.
 
-```js
-const csrfToken = JSON.parse(document.getElementById('app').dataset.page).props.csrfToken;
-await fetch('/api/v1/admin/dsar/<dsar-id>/verify-identity', {
-  method: 'POST',
-  headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken },
-});
-```
+Then click **Log out**, log back in as `admin2@example.test` (**Admin
+Two**) — ADR-0007 requires a *different* admin to approve erasure than
+the one who verified identity — go back to **DSAR queue**, and click
+**Approve erasure**. (If you try this step as Admin One instead, the
+button is still there, but the page shows the real ABAC denial message
+instead of succeeding — that's the separation-of-duties policy working
+as intended, not a bug.)
 
-Then log out (click **Log out** on the `/` page) and log back in as
-`admin2@example.test` (**Admin Two**) — ADR-0007 requires a *different*
-admin to approve erasure than the one who verified identity — and paste
-the same snippet again with `approve-erasure` in place of
-`verify-identity`.
-
-**4. Check completion.** Reload your bookmarked status page from step 2
-— it now shows `complete` and the deletion certificate.
+**4. Check completion.** Reload your bookmarked status page from step 2.
+With the `Demo Connector` created in step 0 (whose `webhook_url` is a
+placeholder, `https://example.test/webhook`, that nothing actually
+listens on), the connector delivery job genuinely retries with backoff
+over several minutes and then genuinely fails — so the status settles on
+`partially_complete`, not `complete`, once it does. **A deletion
+certificate still appears either way** (FR-011 — the certificate states
+the exception rather than silently omitting it), so the DSAR half of the
+cycle is still real and complete from the data subject's point of view;
+it's specifically the *word* "complete" that depends on having a
+connector with a webhook URL something actually answers (tracked as
+R-06 in `docs/project-memory/10-risk-register.md` — there is no
+built-in stub receiver in v1, ADR-0004's connectors are meant to be
+external services).
 
 **5. Withdraw.** Go back to the widget page from step 1 (or reload it —
 it remembers your consent via `localStorage`) and click **Withdraw
 consent**.
 
-Every step above, including step 3, is now something a real visitor and
-a real self-hoster do through a real browser session — no tinker, no
-shell access to application code anywhere in this walkthrough. The one
-remaining rough edge is that verify-identity/approve-erasure have no
-dedicated buttons yet (no admin dashboard), so step 3 calls the JSON API
-directly rather than clicking through a page — but the *authentication*
-behind that call is the real thing: `POST /login`, a real session
-cookie, real CSRF, real rate-limited attempts (see
-`docs/project-memory/10-risk-register.md`, R-05).
+Every step above is now something a real visitor and a real self-hoster
+do through a real browser session, buttons only — no tinker, no shell
+access, no DevTools console, anywhere in this walkthrough. (Step 0's
+consent-purpose/policy/connector bootstrap is the one remaining tinker
+step, tracked as R-02 — unrelated to staff auth or the admin dashboard.)
 
 ## Documentation
 
