@@ -43,20 +43,23 @@ COPY composer.json composer.lock* ./
 # hidden at container start.
 RUN composer install --no-interaction --no-scripts --no-progress
 
+# R-07 (docs/project-memory/10-risk-register.md): this layer — a real
+# Chromium download for Pest's Browser Testing plugin (pestphp/pest-
+# plugin-browser) — is the single most expensive step in the whole build
+# (~15-20 minutes on a cold cache). It depends only on package.json/
+# package-lock.json, never on application code, so it's deliberately
+# copied and run *before* `COPY . .` below: an ordinary code change no
+# longer invalidates this layer and forces a multi-minute re-download,
+# which is what happened when this was ordered after `COPY . .`.
+# `--with-deps` pulls the OS-level libraries a real headless Chromium
+# needs on Debian, matching Playwright's own documented install step.
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund \
+    && npx playwright install --with-deps chromium
+
 COPY . .
 
 RUN composer install --no-interaction --no-progress
-
-# Pest's Browser Testing plugin (pestphp/pest-plugin-browser, added this
-# session for the consent-widget/DSAR-portal E2E test — see
-# tests/Browser/) is pure-PHP for CDP orchestration but still launches a
-# real Chromium via a locally installed `playwright` npm package
-# (Node.js), hence Node here despite this otherwise being a PHP-only
-# image. `--with-deps` pulls the OS-level libraries a real headless
-# Chromium needs on Debian, matching Playwright's own documented
-# install step.
-RUN npm ci --no-audit --no-fund \
-    && npx playwright install --with-deps chromium
 
 EXPOSE 8000
 

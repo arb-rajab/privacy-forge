@@ -56,10 +56,30 @@ a stranger can self-host this and complete a full cycle starting from
 this README alone. It assumes the Quickstart above is already done
 (containers healthy, migrations run).
 
-**0. One-time bootstrap.** There is no seeder yet for consent
-purposes/policies/connectors (tracked as R-02 in
-[`docs/project-memory/10-risk-register.md`](docs/project-memory/10-risk-register.md)) —
-a fresh instance has none of those. Run this once:
+**0. One-time bootstrap.** A fresh instance has no active ABAC policies
+(R-02, formerly in
+[`docs/project-memory/10-risk-register.md`](docs/project-memory/10-risk-register.md),
+closed this session) and no consent purpose/connector to try the widget
+against. Run the real seeder and the reference-connector registration
+command — no tinker, no shell access to application internals:
+
+```bash
+docker compose exec app php artisan db:seed
+docker compose exec app php artisan connectors:register-reference
+```
+
+The seeder creates all five ABAC policies
+(`dsar.identity.verify`, `dsar.erasure.approve`, `policy.update`,
+`retention.policy.manage`, `ropa.export`) so staff actions aren't
+fail-closed-denied by default. The second command registers a real
+connector pointed at this application's own built-in reference/stub
+webhook receiver (R-06, see step 4) and prints a one-time shared secret
+— you don't need to record it for this walkthrough, only for a real
+integration.
+
+One consent purpose still needs creating — this is genuine demo content
+(what a real self-hoster would configure through their own product,
+not a bootstrap gap), so it stays a tinker step:
 
 ```bash
 docker compose exec app php artisan tinker
@@ -69,10 +89,6 @@ docker compose exec app php artisan tinker
 $purpose = \App\Models\ConsentPurpose::create(['name' => 'Newsletter', 'lawful_basis' => 'consent', 'status' => 'active', 'version' => 1]);
 $notice = \App\Models\ConsentNotice::create(['purpose_id' => $purpose->id, 'version' => 1, 'body' => 'We will email you our newsletter. You can withdraw at any time.', 'published_at' => now()]);
 $purpose->update(['current_notice_id' => $notice->id]);
-
-\App\Models\PolicyDefinition::create(['action_name' => 'dsar.identity.verify', 'version' => 1, 'subject_conditions' => ['role' => ['in' => ['owner', 'privacy_manager']]], 'resource_conditions' => [], 'environment_conditions' => [], 'effect' => 'allow', 'status' => 'active']);
-\App\Models\PolicyDefinition::create(['action_name' => 'dsar.erasure.approve', 'version' => 1, 'subject_conditions' => ['role' => ['in' => ['owner', 'privacy_manager']], 'id' => ['not_equals_attribute' => 'resource.identity_verified_by']], 'resource_conditions' => ['status' => ['in' => ['in_progress']], 'request_type' => ['in' => ['erasure']]], 'environment_conditions' => [], 'effect' => 'allow', 'status' => 'active']);
-\App\Models\Connector::create(['name' => 'Demo Connector', 'webhook_url' => 'https://example.test/webhook', 'secret_hash' => str()->random(40), 'status' => 'active', 'registered_at' => now()]);
 
 echo "purpose id: {$purpose->id}\n";
 ```
@@ -120,19 +136,23 @@ instead of succeeding — that's the separation-of-duties policy working
 as intended, not a bug.)
 
 **4. Check completion.** Reload your bookmarked status page from step 2.
-With the `Demo Connector` created in step 0 (whose `webhook_url` is a
-placeholder, `https://example.test/webhook`, that nothing actually
-listens on), the connector delivery job genuinely retries with backoff
-over several minutes and then genuinely fails — so the status settles on
-`partially_complete`, not `complete`, once it does. **A deletion
-certificate still appears either way** (FR-011 — the certificate states
-the exception rather than silently omitting it), so the DSAR half of the
-cycle is still real and complete from the data subject's point of view;
-it's specifically the *word* "complete" that depends on having a
-connector with a webhook URL something actually answers (tracked as
-R-06 in `docs/project-memory/10-risk-register.md` — there is no
-built-in stub receiver in v1, ADR-0004's connectors are meant to be
-external services).
+The reference connector registered in step 0 has a real, built-in
+webhook receiver (`App\Http\Controllers\ReferenceConnectorWebhookController`,
+this session's R-06 fix) — it genuinely receives the signed webhook
+`DispatchConnectorTaskJob` sends and genuinely calls back with its own
+signed response, so the status reaches **`complete`**, with a deletion
+certificate attached (FR-011), usually within a few seconds and reliably
+within well under a minute (a real self-hoster's first attempt sometimes
+sees one delivery retry before success — ADR-0004's own retry/backoff
+handling this correctly, not a bug). ADR-0004's real
+connectors are still meant to be external, third-party-operated
+services in production — this reference/stub is what proves the
+contract works at all, which is exactly what a fresh instance's first
+erasure needs to demonstrate. If you registered a *different* connector
+of your own instead, pointed at a `webhook_url` nothing answers, you'll
+see the same honest `partially_complete` outcome this README described
+before this session — that failure path is correct behaviour, not a
+bug, per FR-009.
 
 **5. Withdraw.** Go back to the widget page from step 1 (or reload it —
 it remembers your consent via `localStorage`) and click **Withdraw
@@ -141,8 +161,10 @@ consent**.
 Every step above is now something a real visitor and a real self-hoster
 do through a real browser session, buttons only — no tinker, no shell
 access, no DevTools console, anywhere in this walkthrough. (Step 0's
-consent-purpose/policy/connector bootstrap is the one remaining tinker
-step, tracked as R-02 — unrelated to staff auth or the admin dashboard.)
+consent-purpose bootstrap is the one remaining tinker step — genuine
+demo content, not a missing seeder; the policy/connector bootstrap that
+used to require tinker too is now two real commands, `php artisan
+db:seed` and `php artisan connectors:register-reference`.)
 
 ## Documentation
 

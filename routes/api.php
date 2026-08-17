@@ -29,7 +29,17 @@ use App\Http\Controllers\ConnectorCallbackController;
 use App\Http\Controllers\ConsentController;
 use App\Http\Controllers\DsarController;
 use App\Http\Controllers\ExportBundleController;
+use App\Http\Controllers\ReferenceConnectorWebhookController;
 use Illuminate\Support\Facades\Route;
+
+// R-06/ADR-0004: the reference/stub connector's own inbound webhook
+// receiver (App\Http\Controllers\ReferenceConnectorWebhookController).
+// Deliberately outside the /v1 prefix below and outside this
+// application's own versioned business contract — this route plays the
+// role of a separate, external connector's server, not a privacy-forge
+// API endpoint, so it isn't versioned alongside the DSAR/consent/admin
+// surface it happens to be reachable through in this same process.
+Route::post('/reference-connector/webhook', [ReferenceConnectorWebhookController::class, 'handle']);
 
 Route::prefix('v1')->group(function () {
     Route::get('/consent-purposes/{purposeId}/notice', [ConsentController::class, 'showNotice']);

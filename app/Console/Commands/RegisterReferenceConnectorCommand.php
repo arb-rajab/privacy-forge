@@ -25,7 +25,8 @@ class RegisterReferenceConnectorCommand extends Command
 
         $connector = Connector::create([
             'name' => $this->option('name'),
-            'webhook_url' => $this->option('webhook-url') ?: config('app.url').'/reference-connector/webhook',
+            'webhook_url' => $this->option('webhook-url')
+                ?: config('connectors.reference_connector_base_url').'/api/reference-connector/webhook',
             'secret_hash' => $secret,
             'status' => 'active',
             'registered_at' => now(),

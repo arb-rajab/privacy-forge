@@ -21,3 +21,19 @@ test('the reference connector registration command creates an active connector a
     expect($connector->webhook_url)->toBe('https://stub.example.test/webhook');
     expect($connector->secret_hash)->not->toBeEmpty();
 });
+
+// R-06: without an explicit --webhook-url, the command must point at
+// this application's own real reference-connector webhook route (not
+// config('app.url'), which resolves to the calling container itself —
+// see config/connectors.php's reference_connector_base_url comment) so
+// `php artisan connectors:register-reference` alone, as the README's
+// step 0 now documents, produces a connector whose webhook a fresh
+// instance can actually reach.
+test('without --webhook-url, the command defaults to this application\'s own real reference-connector route', function () {
+    $this->artisan('connectors:register-reference')->assertSuccessful();
+
+    $connector = Connector::query()->firstOrFail();
+    expect($connector->webhook_url)->toBe(
+        config('connectors.reference_connector_base_url').'/api/reference-connector/webhook'
+    );
+});

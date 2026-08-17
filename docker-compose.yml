@@ -14,6 +14,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: privacy-forge-app:latest
     ports:
       - "8000:8000"
     volumes:
@@ -55,9 +56,16 @@ services:
       - app
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    # R-07 (docs/project-memory/10-risk-register.md): `worker` used to
+    # declare its own `build:` block, identical in every instruction to
+    # `app`'s — on a cold cache, `docker compose up --build` built the
+    # same ~15-20 minute Playwright/Chromium layer twice, in parallel,
+    # roughly doubling first-build cost for no benefit (the two images
+    # are byte-identical; only the `command:` below differs). Reusing
+    # `app`'s tagged image means only one build ever runs; Compose still
+    # rebuilds it (once) whenever `docker compose up --build` is used,
+    # since `app` above still owns the real `build:` section.
+    image: privacy-forge-app:latest
     command: ["php", "artisan", "queue:work", "--tries=3"]
     volumes:
       - .:/var/www/html
