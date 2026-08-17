@@ -7,573 +7,581 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 16 — Make the demo actually work end to end**
-- Objective: close R-02 and R-06 *properly* (not documented around), add and
-  investigate R-07 (Docker cold-build time), and re-verify Success Metric #1's
-  timing claim honestly with both fixes in place.
-- Status: **complete, not yet pushed** — 160/160 Feature/Unit tests pass (157
-  carried over + 3 new: two in `ReferenceConnectorWebhookTest.php`, one in
-  `RegisterReferenceConnectorCommandTest.php`), Pint clean (149 files),
-  Larastan level 8 clean, ESLint clean, `docs/architecture/openapi.yaml`
-  re-validated (`openapi_spec_validator`, throwaway `python:3.12-slim`
-  container) — OK, unchanged. **The Browser/E2E suite (`composer test:e2e`)
-  could not be run to completion this session** — see the dedicated section
-  below (R-08) for why, and why this is assessed as an environment issue in
-  this specific sandbox rather than a product regression.
+- Session number and title: **Session 17 — Close two Session 16 loose ends
+  (R-07's real number, R-08's reproducibility), then close R-04**
+- Objective, in priority order per this session's brief: (A) determine
+  whether Session 16's duplicate-build fix also helps a genuinely
+  first-ever cold clone, and get a real cold-clone build-time number if at
+  all feasible; (B) determine whether Session 16's browser-suite hang was
+  actually sandbox-specific by testing on a different host, and either get
+  it running, or gain equivalent confidence some other honest way; (C) if
+  time remained, begin R-04 (audit-log external anchor).
+- Status: **complete, not yet pushed.** All three parts were completed.
+  Part A produced a real, directly-measured cold-clone number (not just a
+  layer-level estimate). Part B's reproducibility check came back
+  positive — the hang **does** reproduce on a second, unrelated host — but
+  a real manual walkthrough was substituted to re-confirm the specific
+  backend claims Sessions 14/15 made, with an explicit, honest scope limit
+  on what that walkthrough cannot prove. R-04 was fully implemented and
+  proven with a real attack-simulation test, not just an assertion.
+  165/165 Feature tests pass (160 carried over + 5 new, all in
+  `AuditChainAnchorTest.php`), Pint clean (152 files), Larastan level 8
+  clean, ESLint clean, `docs/architecture/openapi.yaml` re-validated
+  (`openapi_spec_validator`, throwaway `python:3.12-slim` container) — OK,
+  unchanged (R-04 added no new HTTP surface).
 
-## The factual question this session was asked to answer first
+## Part A — R-07: does the duplicate-build fix help the first-ever cold clone, and what does a real cold-clone build actually cost?
 
-**Has a real, standalone reference/stub connector ever existed and been
-exercised over real HTTP, or has all connector dispatch/callback logic only
-ever been tested against an in-process test double?**
+**Short answer to both halves of the question, stated plainly up front:**
+yes, the duplicate-build fix helps the first-ever cold clone (not only
+repeat rebuilds) — and a real, directly-measured first-ever cold clone on
+this session's host took **2083 seconds (~34.7 minutes)**, more than
+double Success Metric #1's 900-second budget on its own.
 
-**Answer: no real, standalone connector had ever existed or been exercised
-over real HTTP, anywhere in this project's history, before this session.**
-This was verified by reading the actual code and test files, not assumed:
+### Which of Session 16's two fixes helps which scenario
 
-- `app/Console/Commands/RegisterReferenceConnectorCommand.php` existed
-  already, but it only ever inserted a `Connector` database row. Its default
-  `webhook_url` (`{app.url}/reference-connector/webhook`) pointed at a route
-  that had never been built anywhere in the codebase (confirmed by grepping
-  the entire repo for `reference-connector` before this session's changes —
-  zero matches outside that one command).
-- Every outbound webhook test (`tests/Feature/ConnectorDispatchTest.php`)
-  uses `Http::fake()` to intercept `DispatchConnectorTaskJob`'s delivery —
-  never a real HTTP call to anything real.
-- Every inbound callback test (`tests/Feature/ConnectorCallbackAuthTest.php`,
-  and the one in `ConnectorDispatchTest.php` that reaches `complete`) hand-
-  signs a payload with `ConnectorSignatureService` and calls
-  `postJson('/api/v1/connector-callback/{taskId}', ...)` directly — this is
-  the test *simulating* what a connector would send, not a connector
-  actually sending it.
-- `tests/Browser/DsarLifecycleTest.php` (Session 15's flagship "Success
-  Metric #1" test) does the same hand-signed simulation for its connector
-  step, with an explicit comment acknowledging as much ("Simulates the
-  connector's real callback").
+Session 16 shipped two independent fixes to `docker/Dockerfile` and
+`docker-compose.yml`:
 
-**This makes R-06's prior framing an understatement.** It was previously
-described as "the README's demo connector points at a placeholder domain" —
-true, but the deeper and more important fact is that **the entire DSAR
-completion path had never been proven to work over real HTTP at all**, only
-against test doubles. This session treats that as the real finding and fixes
-it accordingly (see "What was built" below), rather than just pointing the
-README's placeholder at something real.
+1. **Layer reordering** — the `npm ci && npx playwright install
+   --with-deps chromium` step now runs *before* `COPY . .`, so an ordinary
+   code change doesn't invalidate that layer's cache.
+2. **Duplicate-build elimination** — `worker` no longer declares its own
+   `build:` block; it reuses `app`'s already-built, tagged image.
 
-## What was built
+These have **different relationships to a first-ever cold clone**:
 
-### 1. A real reference/stub connector — `App\Http\Controllers\ReferenceConnectorWebhookController` (new)
+- **Layer reordering helps only repeat builds.** A first-ever build starts
+  with an empty cache by definition — there is nothing to invalidate
+  either way, so reordering contributes nothing to the first build's total
+  time. It remains valuable for every build *after* the first (which is
+  the common case in practice, and the case Session 16 measured at 165s).
+- **Duplicate-build elimination helps both repeat builds *and* the
+  first-ever cold build.** The duplication was structural — two
+  independent `build:` blocks with no shared cache key between them — not
+  a function of cache state. Session 16 directly observed the pre-fix
+  code running the identical ~15-18 minute Playwright/Chromium layer
+  *twice, in parallel*, specifically **on a cold cache** (two separate
+  `RUN npm ci && ...` steps in the same build log, each paying the full
+  download cost independently). That observation was already evidence
+  this fix mattered for the first build, not only the tenth. This
+  session's own from-scratch build (below) confirms it directly: the build
+  log shows zero build steps for `worker` — it went straight from `app`'s
+  finished image to `Container privacy-forge-worker-1 Creating`, with no
+  second Playwright/Chromium download anywhere in the log.
 
-**Design choice: a route within this same application, not a wholly separate
-service.** Both options were on the table (per this session's brief); this
-one was chosen because:
+This session did **not** revert the fix and re-measure the old buggy
+behaviour side-by-side to get an exact "with vs. without" delta — that
+would mean deliberately reintroducing a closed defect purely to benchmark
+it, which felt like the wrong trade against the structural reasoning above
+plus Session 16's own direct log observation, already strong evidence on
+its own. If a precise delta ever matters, it would need to be measured by
+temporarily reverting `docker-compose.yml`'s `worker` service, not by
+guessing.
 
-- It still requires two genuinely separate, real HTTP round trips — the
-  `worker` container's outbound webhook and this controller's own outbound
-  callback both leave the process that sent them and are received by a real
-  HTTP server on the other end. In the docker-compose demo, the webhook leg
-  genuinely crosses a container boundary (`worker` → `app`), which is the
-  real trust/process boundary ADR-0004's contract is meant to prove works,
-  not merely a same-process method call.
-- A wholly separate service (its own Dockerfile/image/compose service) would
-  have added new infrastructure — another image to build, another port,
-  another thing to document — directly working against R-07 (this session's
-  other objective is *reducing* cold-build cost, not adding a fourth image).
-- It does not reopen ADR-0004: the ADR requires "a reference/stub connector
-  built specifically to prove the contract," not that it live in a separate
-  repository or deployment. Nothing about the ADR's decision, trade-offs, or
-  consequences needed to change.
+### The real cold-clone number
 
-It deliberately **reimplements the HMAC-over-`timestamp.body` signing by
-hand** (`hash_hmac('sha256', ...)` inline) rather than reusing
-`ConnectorSignatureService`, matching what a real third-party connector
-author would have to do working only from the documented contract
-(`05-api-contracts.md`), not this repository's source. **Stated limitation,
-not glossed over:** it reads the connector's shared secret from the same
-`connectors` table this application owns — a genuinely independent connector
-would instead have stored the secret it was shown once at registration time
-in its own separate configuration. This is accepted for a same-repository
-reference/stub whose job is to prove the wire contract, not to model full
-deployment isolation.
+Session 16 attempted this exact measurement and could not get a clean
+result (a `docker builder prune -f` followed by `docker compose up
+--build` showed a ~13-hour anomalous gap in that sandbox, honestly reported
+as not a real measurement). This session repeated the attempt on a
+**genuinely different host** (Windows 11 + Docker Desktop, WSL2 backend,
+vs. Session 16's Linux sandbox) and got a clean result:
 
-It also follows the existing `ConnectorCallbackController`'s T-05-style rule
-that "unknown task" and "bad signature" must be indistinguishable to an
-unauthenticated caller (both collapse to the same generic 401) — this route
-is just as publicly reachable as the real callback endpoint, so it needed
-the same anti-existence-oracle treatment; this was caught and fixed during
-this session's own review of the first draft.
+1. `docker compose down` (stack stopped, volumes preserved).
+2. `docker rmi -f privacy-forge-app:latest privacy-forge-worker:latest
+   privacy-forge-frontend:latest` (all three project images removed).
+3. `docker builder prune -af` — confirmed **0B build cache, 0 project
+   images** remaining before starting (`docker system df` checked
+   directly, not assumed).
+4. A single bracketed `docker compose up --build -d`, timestamped with
+   `date +%s` immediately before and after.
 
-New route: `POST /api/reference-connector/webhook` (`routes/api.php`,
-outside the `/v1` prefix — it plays the role of a separate connector's own
-server, not a versioned part of this application's business API).
+**Result: 2083 seconds (~34.7 minutes) wall-clock**, start to all six
+containers (`app`, `frontend`, `worker`, `postgres`, `redis`, `minio`)
+reporting healthy/running. This is the number Success Metric #1's
+15-minute budget actually depends on — not the 165-second repeat-rebuild
+number, which was never the right number for this question and was never
+claimed to be by Session 16 either (its own handoff was explicit that the
+first-build cost was separate and unmeasured).
 
-New config: `connectors.reference_connector_base_url`
-(`REFERENCE_CONNECTOR_BASE_URL`, default `http://app:8000`) — deliberately
-**not** `config('app.url')` (`http://localhost:8000` by default), which
-resolves to whichever container calls it, not specifically the `app`
-service; a webhook dispatched from the `worker` container needs the
-docker-compose service name `app` to reach the right container at all.
-`RegisterReferenceConnectorCommand`'s default `webhook_url` now uses this.
+BuildKit's own step timings, recovered from the build log, give a partial
+breakdown (the very first ~1250s of steps — initial `apt-get`, nodesource
+setup, first `composer install`, and the separate `frontend` image's own
+`npm install` — fell outside the retained log tail and were not broken
+down individually this session, though they're included in the 2083s
+total):
 
-### 2. `database/seeders/PolicyDefinitionSeeder.php` + `DatabaseSeeder.php` (new) — R-02
+| Step | Time |
+|---|---|
+| `npm ci && npx playwright install --with-deps chromium` | 468.0s (~7.8 min) |
+| `COPY . .` | 7.1s |
+| second `composer install` (post-`COPY . .`) | 17.2s |
+| exporting layers | 209.2s |
+| unpacking final image | 138.5s |
+| **image export + unpack, total** | **348.7s (~5.8 min)** |
+| (remaining steps, not broken down) | ~1266s |
+| **Total** | **2083s** |
 
-Seeds all five sensitive-action `PolicyDefinition` rows
-(`dsar.identity.verify`, `dsar.erasure.approve`, `policy.update`,
-`retention.policy.manage`, `ropa.export`) with the exact same shapes as the
-ADRs specify and the existing test factory already exercises — written
-directly rather than reusing `PolicyDefinitionFactory` (test scaffolding
-shouldn't be a production dependency). Idempotent via `firstOrCreate`.
-`php artisan db:seed` on a fresh instance now takes ~4 seconds and leaves a
-fresh instance with zero fail-closed denials waiting to happen.
+Two things worth stating honestly:
 
-### 3. `tests/Feature/ReferenceConnectorWebhookTest.php` (new)
+1. **The Playwright/Chromium layer took less time this session (468s)
+   than Session 16 measured on its own host (~1069s).** Both numbers are
+   real, directly measured — the difference is environment/network
+   variance (this session's host, this session's network path to the
+   Playwright CDN, at this specific time), not either session's number
+   being wrong. Neither should be read as a universal constant.
+2. **Image export/unpack (348.7s) is a previously unmeasured, unreported
+   cost roughly as large as the Chromium download itself.** This is a
+   containerd-image-store operation (exporting the ~3.3GB `app` image's
+   layers, then unpacking them) — not something either of Session 16's
+   two fixes touches, and not mentioned in Session 16's own handoff. It's
+   plausibly worse on this specific host (Windows Docker Desktop/WSL2)
+   than on a native Linux daemon, though this session did not attempt to
+   isolate that variable (would need a second Linux host to compare
+   against, out of scope here).
 
-Two tests. The main one chains three *real* production classes —
-`DispatchConnectorTaskJob`, `ReferenceConnectorWebhookController`,
-`ConnectorCallbackController` — through the real `approve-erasure` admin
-endpoint, reaching `status: complete` (not `partially_complete`) on a fresh
-seed. **Honest limitation stated in the test's own comment:** Pest Feature
-tests are single-process/single-transaction, so a literal second OS process
-can't be involved without breaking `RefreshDatabase` visibility — `Http::
-fake()` is used to redirect the job's real HTTP call into this same
-process's real routing (via `postJson`) rather than a second real socket.
-Every byte of what the job actually built (headers, raw signed body)
-survives that redirection unchanged, and neither controller's logic is
-faked — this proves the *contract logic* is correct on both ends; the
-genuinely cross-container version of the same call is what the manual
-walkthrough below actually exercises for real.
+**Net honest statement for R-07:** the two fixes Session 16 shipped are
+real, correctly structural (not accidental cache artifacts), and both help
+a first-ever cold clone or at minimum don't hurt it — but they were never
+going to bring a genuinely first-ever build under the 15-minute budget on
+their own, because the layer they target (~7-18 minutes depending on
+network conditions) is only part of the real cost. A real, direct
+measurement now exists — 2083s — and it exceeds the budget by more than
+2x. The residual risk Session 16 flagged as "unavoidable without a
+registry-hosted prebuilt image" is now a confirmed number, not a
+suspicion.
 
-This test's first draft armed `Http::fake()` *after* calling
-`approve-erasure`, and failed with a real cross-process 401 — a genuine
-lesson (documented in the test's own comment): `QUEUE_CONNECTION=sync` in
-the test environment means `DispatchConnectorTaskJob` runs synchronously
-*inside* the `approve-erasure` request itself, so the fake has to be armed
-before that call, not after.
+## Part B — R-08: does the browser-suite hang reproduce on a different host?
 
-The second test proves a tampered webhook body (valid signature, different
-body than what was signed) is rejected with the same generic 401 used for
-every other rejection reason.
+**Short answer: yes.** Session 16 assessed the hang as "environment issue
+specific to this sandboxed session, not a product regression," and
+explicitly flagged that the next session should check reproducibility on
+a different host before trusting that assessment. This session did
+exactly that, on a genuinely unrelated host (Windows 11 + Docker
+Desktop/WSL2, vs. Session 16's Linux sandbox) — **and the hang reproduced
+with the same signature.** That specific hypothesis ("this was just
+Session 16's sandbox") is now rejected by direct evidence, not merely
+still unconfirmed.
 
-### 4. `docker/Dockerfile` and `docker-compose.yml` — R-07
+### What was tried, and what was found
 
-See the dedicated R-07 section below and `10-risk-register.md` for the full
-detail. Two real fixes, both verified this session:
+Before retrying blindly, this session first reasoned about what Session
+16 actually changed that could plausibly affect the browser suite: Docker
+layer reordering (could affect whether/how Chromium is available inside
+the container at test time), the new `ReferenceConnectorWebhookController`
+route (a port/routing conflict), and the new seeder/connector-registration
+logic running during test setup. None of these held up on inspection —
+the new route lives on the same port/process as everything else (no new
+port), the seeder only inserts five rows in ~120ms, and there is no
+`.dockerignore` clobbering concern on this host specifically because this
+host's `node_modules`/`vendor` directories happened to be empty (checked
+directly) — none of Session 16's changes gave a live lead.
 
-1. The Playwright/Chromium install layer now runs before `COPY . .`, so an
-   ordinary code change no longer invalidates it.
-2. `worker` no longer builds its own (identical) image — it reuses `app`'s
-   tagged image, so a cold build pays the ~15-18 minute Playwright cost once
-   instead of twice.
+`docker compose exec -T app vendor/bin/pest tests/Browser -v` was run
+directly (bypassing Composer's 900s timeout, as Session 16 also did). This
+time, the browser suite's own database bootstrap (`RefreshDatabase`) was
+first confirmed to have reset the shared dev database exactly as expected
+— an important note for the next section, since it meant the manual
+walkthrough's seed data had to be redone afterward.
 
-### 5. `README.md`
+The process tree was inspected directly via `/proc/<pid>/cmdline` (no
+`ps` binary in this minimal image, matching Session 16's own approach) and
+showed a **fuller, healthier-looking process tree than Session 16
+reported**: not just a resident Chromium process, but a real zygote, a GPU
+process, a network-service utility process, and two renderer processes —
+genuine multi-process Chromium startup, further than Session 16 described
+reaching. And yet: **zero `GET`/`POST` navigation requests ever appeared
+in the app container's request log**, checked via `docker compose logs
+app` across 12+ minutes. The browser process's own accumulated CPU time
+(`/proc/<pid>/stat`, fields 14/15 — `utime`/`stime`) grew by only ~8 clock
+ticks (~0.08s) across several minutes of real wall-clock time — a stalled
+handshake, not a slow-but-working test, exactly matching Session 16's own
+characterisation on a completely different host.
 
-Step 0 rewritten: `php artisan db:seed` + `php artisan
-connectors:register-reference` replace the old `PolicyDefinition::create()`
-and `Connector::create()` tinker calls. Only the consent-purpose bootstrap
-remains a tinker step, and it's now explicitly described as genuine demo
-content (a real self-hoster's own configuration), not a seeder gap. Step 4
-rewritten: the walkthrough now reaches `complete` with a deletion
-certificate, not `partially_complete` — with an honest note that a
-*different*, self-registered connector pointed at an unreachable URL would
-still and correctly show `partially_complete` (FR-009 behaviour, not a bug).
+**A concrete, plausible (not proven) mechanism** was identified this
+session by reading the actual launch chain from `/proc`: `pest` (PHP) →
+`sh -c './node_modules/.bin/playwright run-server ... --mode
+launchServer'` → `node` → `chrome-headless-shell`, with Chromium launched
+using `--remote-debugging-pipe` (CDP over inherited file descriptors 3/4,
+not a TCP/WebSocket port). The intermediate `sh -c` shell in that chain is
+a well-documented place where exact fd 3/4 inheritance for Playwright's
+pipe transport can silently break across process layers — which would
+produce exactly this symptom: a real Chromium process launches
+successfully, but the CDP handshake never completes because neither side
+is actually connected to the file descriptors the other expects. This is
+Playwright/`pestphp/pest-plugin-browser`'s own launch behaviour (visible
+in `node_modules`, not this repository's code), not something any
+application-code session — including Session 16 — introduced. This
+session did **not** attempt to patch vendor code or force an alternative
+CDP transport to confirm or fix this; that would be a materially larger
+undertaking than this session's scope, and is left as the lead for a
+future session (see the risk register's R-08 entry for the specific next
+step suggested).
 
-## R-07 — Docker cold-build time, investigated and partially mitigated this session
+The hung process and its full child tree (`pest`, `node`,
+`chrome-headless-shell` ×5) were killed cleanly before moving on, so no
+stray processes were left behind for the next `docker compose exec`, the
+same housekeeping issue Session 16 flagged.
 
-**Both identified root causes were fixed and verified working this
-session:**
+### The manual walkthrough — what was actually re-confirmed, and what wasn't
 
-1. **Layer ordering.** `docker/Dockerfile`'s `npm ci && npx playwright
-   install --with-deps chromium` step — independently measured at
-   ~15-18 minutes on this host across two separate observations this
-   session (Playwright's own progress output: ~1069s for the Chromium
-   binary download alone) — was ordered *after* `COPY . .`, meaning it
-   re-ran on every rebuild that touched any file in the repository, not
-   only `package.json`/`package-lock.json` changes. Reordered so
-   `COPY package.json package-lock.json*` and that install step run first.
-2. **Duplicate builds.** `docker-compose.yml`'s `app` and `worker` services
-   each declared their own `build:` section with an *identical* Dockerfile —
-   confirmed directly this session that a cold `docker compose up --build`
-   ran the expensive Playwright install step twice, once per service, fully
-   in parallel (two separate `RUN npm ci && ...` steps in the same build
-   log, each paying the full download independently). `worker` now has no
-   `build:` section at all and reuses `app`'s tagged image
-   (`privacy-forge-app:latest` on both services) — Compose only builds it
-   once.
-
-**Verified together, immediately after a genuinely cold build:** running
-`docker compose up -d --build` again (no `package.json`/lockfile change)
-completed in **165 seconds total**, with only one image ("app") reported as
-`Building` instead of two, and the npm/Playwright layer showing `CACHED`.
-This is the realistic, common-case improvement: an ordinary code change
-between releases no longer re-triggers a 15-18 minute wait, and it never
-triggers it twice.
-
-**What this does *not* fix, stated plainly:** a genuinely first-ever clone's
-very first build still has to download Chromium at least once — there is no
-way around that without a registry-hosted prebuilt image (`docker compose
-pull`), which was considered but not attempted this session (it needs a
-registry + a CI publishing step, out of scope). **A trustworthy, clean,
-single-number measurement of that genuinely-first-ever-build cost could not
-be obtained this session** — see the honest caveat below.
-
-**Honest caveat on this session's own cold-build measurement attempt:**
-after `docker builder prune -f` (confirmed reclaiming 11.76GB — a genuinely
-empty builder cache), a single `docker compose up --build` invocation showed
-a **~13-hour gap** between this session's own bracketing `date +%s`
-timestamps (1786911015 → 1786957530), alongside transient
-`getaddrinfo EAI_AGAIN cdn.playwright.dev` DNS failures during the Chromium
-download and a `docker compose up` failure at the very end from a stray
-concurrent process's container-name conflict (`privacy-forge-minio-1`
-already in use). **This number is not reported as a build-time measurement
-anywhere in this handoff or the risk register, because it plainly is not
-one** — it reflects an anomaly in this specific sandboxed session
-environment (most plausibly overlapping/racing background build processes
-from earlier diagnostic attempts this session, though the exact cause of the
-13-hour gap itself was not root-caused), not the Dockerfile or Docker
-itself. Reporting it as "the cold build takes 13 hours" would be dishonest
-in the other direction from reporting a rosy number — both would misrepresent
-what was actually observed. The individual layer-level Playwright download
-time (~15-18 minutes, measured twice, consistent both times) is the number
-actually trusted and reported above.
-
-## R-08 (new) — Browser/E2E test suite hung this session, root cause not found
-
-`composer test:e2e` (`tests/Browser/`) — which Sessions 14-15 report passing
-reliably (with a "re-run twice for stability" note, but nothing resembling
-this) — **hung indefinitely every time it was attempted this session**, on
-this specific sandboxed host, across four independent attempts:
-
-1. `composer test:e2e` (default) — hit Composer's own 900-second
-   `process-timeout` twice.
-2. Killed all stray leftover `pest`/Chromium/Playwright processes (discovered
-   three overlapping generations of them, left behind because Composer's
-   timeout kills its own wrapper process but not the child process tree —
-   itself a minor real finding, noted here rather than acted on further,
-   since it's a Composer/process-tree issue orthogonal to this session's
-   scope) and ran `vendor/bin/pest tests/Browser -v` directly, bypassing
-   Composer's timeout entirely.
-3. Fully restarted the `app` container for a clean process/socket state and
-   retried.
-4. Retried again with `docker compose exec -T` (no TTY allocation), on the
-   theory that Chromium's `--remote-debugging-pipe` (which uses raw file
-   descriptors 3/4) might be sensitive to PTY allocation. (In retrospect this
-   theory doesn't hold up — those fds are created internally by Node's own
-   `child_process.spawn()` inside the container, independent of how the
-   outer `docker compose exec` is invoked — but it was cheap to rule out.)
-
-**None of the four attempts ever logged a single page-navigation request**
-(`GET`/`POST` to `/login`, `/embed-example.html`, etc.) **in the app
-container's request log**, even after 10+ minutes of wall-clock time each —
-confirmed via `docker compose logs app`. A real headless Chromium process
-does launch and stay resident (confirmed via `/proc`), but its accumulated
-CPU time stays near zero the entire time (checked via `/proc/<pid>/stat`),
-consistent with something hung waiting on a handshake, not merely slow.
-Memory and CPU headroom were never the issue (checked via `docker stats` —
-container never went above ~400MB of a 5.7GB limit, ~1% CPU).
-
-**Assessed as an environment issue specific to this sandboxed session, not a
-product regression, for two reasons:**
-
-1. Every file this session added or changed is either a new backend route/
-   config/seeder (`ReferenceConnectorWebhookController`, `connectors.php`,
-   the seeders, `docker/Dockerfile`, `docker-compose.yml`) or a new Feature
-   test — nothing touching the widget, DSAR portal, login page, or admin
-   dashboard the browser tests actually drive.
-2. The *Feature* test suite — which exercises the identical underlying ABAC/
-   connector/DSAR business logic these browser tests also cover, including
-   the two new tests proving this session's own R-06 fix — passes cleanly,
-   160/160. A genuine manual curl-driven walkthrough against the real
-   running docker-compose stack (below) independently confirms the same
-   business logic works end-to-end over real HTTP.
-
-Logged as **R-08** in `10-risk-register.md`, not silently worked around.
-**Next session should check whether this reproduces on a fresh
-host/checkout before investigating further** — if it doesn't reproduce, this
-was specific to this session's sandbox and can be closed without a code
-change.
-
-## The actual timing walkthrough — re-run this session, against the real running stack
-
-Unlike Session 15 (which measured against the dev server directly), this
-session's timing walkthrough ran against the **actual docker-compose stack**,
-via real `curl` calls against `http://localhost:8000` (the same port the
-README tells a self-hoster to visit), from a genuinely fresh database
-(`php artisan migrate:fresh`). Staff login/CSRF were driven for real (a real
-`GET /login` to obtain a CSRF cookie, decoded and sent back as
-`X-XSRF-TOKEN`, exactly as a real browser would) — not `actingAs()`, not a
+Since the automated suite could not be run to completion, this session
+built the same kind of substitute confidence used for R-06's manual
+verification last session: real HTTP calls, with real cookies/CSRF/
+sessions, against the live docker-compose stack — driving the exact same
+endpoints the admin dashboard's buttons call, not `actingAs()`, not a
 shortcut.
 
-| Step | What was timed | Measured |
+**What was verified, one claim at a time, against a freshly reseeded
+database:**
+
+| Claim (from Sessions 14/15) | How it was re-checked this session | Result |
 |---|---|---|
-| `php artisan migrate:fresh` | Full schema from empty | 5s |
-| `php artisan db:seed` | All 5 ABAC policies (R-02) | 4s |
-| `php artisan connectors:register-reference` | Real reference connector (R-06) | 2s |
-| `php artisan privacy-forge:create-owner` × 2 | Two staff accounts | 5s |
-| Consent purpose/notice bootstrap (tinker — genuine demo content, not a seeder gap) | 3s |
-| Step 1: consent capture | 2s |
-| Step 2: erasure DSAR submit | 1s |
-| Step 3, Admin One: login + verify-identity | 5s |
-| Step 3, Admin Two: login + approve-erasure | 2s |
-| **Async: real cross-container webhook → callback → `complete`** | `worker` container dispatches, `app` container receives + calls back, both over the real Docker network | **46s** (see below) |
-| **Total, machine-executed, zero human pause** | | **~75 seconds (~1.25 minutes)** |
+| Real staff login works | `GET /login` for a real CSRF cookie, decoded, `POST /login` with `X-XSRF-TOKEN` and real credentials | `200`, real session cookie issued |
+| The "Verify identity" button's endpoint works | `POST /api/v1/admin/dsar/{id}/verify-identity`, authenticated as the real logged-in admin | `200`, DSAR moved to `in_progress` |
+| ADR-0007's separation-of-duties denial renders as a real ABAC decision | Same admin immediately calls `approve-erasure` on the same DSAR | Real `403`, `"The dsar.erasure.approve policy denied this request."` |
+| The "Approve erasure" button's endpoint works for a *different* admin | Second admin logs in for real, calls `approve-erasure` | `200` |
+| The DSAR reaches real completion via the async worker/reference-connector round trip (R-06) | Queried `DsarRequest::find($id)->status` directly against the database after the above | `complete` |
+| The buttons' click handlers call these exact endpoints | Read `resources/js/Pages/AdminDsarQueue.vue` directly | Confirmed: `verifyIdentity()`/`approveErasure()` call `performAction(dsar, 'verify-identity')`/`'approve-erasure'`, matching the routes above exactly |
 
-**The 46-second async step is the headline result — this is the actual proof
-R-06 is fixed for real, not just in a Pest test.** After `approve-erasure`
-returned, the DSAR sat at `in_progress` while the real `worker` container
-(a genuinely separate Docker container, `queue:work` against the real Redis
-queue configured in `.env`) picked up the job, and reached `status: complete`
-with a deletion certificate ~46 seconds later, confirmed by querying the
-database directly (not the API) so there's no risk of the check itself being
-faked. `docker compose logs worker` shows the real sequence:
-`DispatchConnectorTaskJob` `RUNNING` → `FAIL` after 30s → `RUNNING` again
-15s later (matching ADR-0004's own documented backoff schedule) → `DONE` in
-106ms.
+**What this walkthrough does not and cannot confirm, stated as plainly as
+the task asked for:** that a real browser actually renders these buttons,
+and that a real mouse click actually fires those handlers. This is not a
+minor caveat — it was checked directly and confirmed to be a real gap:
+`GET /admin/dsar`'s server-rendered HTML was fetched and its Inertia
+`data-page` JSON payload inspected directly. It carries only
+`errors`/`auth`/`csrfToken` — **no DSAR queue data at all**. The queue
+list (and therefore whether "Verify identity"/"Approve erasure" buttons
+even appear for a given row) is fetched client-side, after Vue mounts and
+runs its own `fetch()` call. A curl-only check structurally cannot observe
+that — it would need a real browser executing real JavaScript against a
+real DOM, which is exactly what the hung suite would have proven and
+exactly the one part of Sessions 14/15's claims this session leaves
+genuinely unconfirmed.
 
-**That 30-second first-attempt failure is itself a genuine, interesting,
-honestly-reported finding, not swept under the rug:** `storage/logs/
-laravel.log` shows both the job's outbound webhook call *and* the reference
-connector's own outbound callback call independently hit `cURL error 28:
-Operation timed out after 30002/30003 milliseconds` targeting
-`http://app:8000/...`. The most plausible explanation (not fully root-caused
-this session, since it self-healed and didn't block anything): `php artisan
-serve` (the dev-only server this Dockerfile explicitly documents as
-development-only, not production) handles one request at a time; the
-reference connector's own outbound callback is a *second* connection back to
-that same single-threaded server made *while it's still busy* handling the
-first (inbound webhook) request. **ADR-0004's existing retry/backoff design
-already handles this correctly** — this is presented as a validation that
-the retry design earns its keep, not as a new problem needing a fix; it did
-not stop the DSAR from reaching `complete` well inside the 15-minute budget,
-and it is not proposed as a new tracked risk for that reason.
+### Is R-08 resolved, worked around, or still open? (asked to be unambiguous)
 
-**Honest comparison to Session 15's own measurement:** Session 15 measured
-~2.5-2.7 minutes for the DSAR-completion half of the walkthrough alone, and
-that walkthrough *never actually reached `complete`* — it settled on
-`partially_complete` after ~3.75 minutes of genuine retry exhaustion against
-a placeholder domain nothing answered. **This session's ~75-second total,
-reaching a genuine `complete`, is both faster and — for the first time —
-actually correct**, not merely faster at reaching the wrong outcome.
+**Still open, not resolved — but no longer ambiguous, and worked around
+for this session's purposes.** The suite does not run; the hypothesis
+that this was sandbox-specific is now rejected by evidence rather than
+merely untested; a real, scoped manual walkthrough substitutes for it with
+an explicit, honest account of what it does and doesn't cover (backend
+contract: re-confirmed; real DOM click-through: not confirmed, not
+claimed). Success Metric #1's staff/admin claim from Session 15 should be
+read accordingly: the mechanisms those buttons depend on are freshly
+re-verified against a live, post-Session-16 stack; the specific claim "a
+real button click fires them" rests on Session 15's original browser test
+run and has not been re-verified since Session 16's infrastructure
+changes landed.
 
-**Docker build time is not included in the ~75-second total above, and
-that's the honest, deliberate choice, not an oversight** — see R-07: the
-common-case rebuild (after R-07's fixes) adds ~165 seconds; a genuinely
-first-ever clone's first build adds an unavoidable, unmeasured-cleanly-this-
-session ~15-18+ minutes for the Chromium download alone, which could still
-put a cold-cache stranger over the 15-minute budget on its own, exactly as
-Session 15 already flagged.
+## R-04 — audit-log periodic external anchor (ADR-0003), closed this session
 
-## Success Metric #1 — re-checked explicitly
+With Parts A and B done, this session had time for R-04, the next
+recommended priority per Session 16's own handoff, and completed it.
 
-**The staff/admin UI-only claim from Session 15 (verify-identity/approve-
-erasure via real buttons, no DevTools) is unchanged and still holds** — this
-session did not touch any frontend/UI code. **What this session adds:** the
-DSAR itself now genuinely *completes*, not just gets processed — the
-specific gap Session 15's own handoff flagged as the reason the metric
-wasn't an unconditional "yes."
+### What was built
 
-**Still not an unconditional "yes, full stop," for two reasons — one
-narrowed, one new:**
+`app/Services/AuditLogger.php` gained two methods:
 
-1. **The 15-minute number is still conditional on Docker build/cache
-   state**, same as Session 15 found — narrowed this session (a repeat
-   build is now ~165 seconds instead of potentially 15-18+ minutes twice
-   over), but a genuinely first-ever cold clone still pays an unavoidable
-   Chromium-download cost this session could not eliminate or cleanly
-   measure end-to-end (R-07).
-2. **R-08 (new): the browser test suite that would otherwise be the
-   strongest automated proof of the UI-only claim could not be run this
-   session.** The claim itself is still believed true (Session 15's own
-   browser test proved it with real Playwright clicks, and nothing UI-side
-   changed this session), but it is not re-verified by an automated browser
-   test this specific session, only by the (unchanged) fact that Session 15
-   did verify it and this session touched none of that code.
+- **`anchorChain()`** — writes the current chain head (latest entry's
+  `sequence` + `entry_hash`) to a new, uniquely-keyed object on the `s3`
+  disk (`audit-anchors/{sequence}.json`). This disk is the **same external
+  object storage export bundles already use** (Session 8/`ExportBundleAssembler`)
+  — no new infrastructure dependency, no new architectural pattern, no
+  third new technology against the 2-tech learning-budget cap. The anchor
+  is deliberately **not** stored in this application's own Postgres
+  database: ADR-0003's whole point is protecting against an attacker who
+  has *already* compromised the database and can edit any row — an anchor
+  living in that same database would be exactly as editable by that
+  attacker, which would defeat the purpose entirely. `anchorChain()` never
+  issues a write to an already-anchored sequence's key, so anchors are
+  append-only by construction (an accepted limitation, matching ADR-0003's
+  own stated one: this proves tamper *evidence*, not tamper
+  *impossibility* — a real deployment hardening this further would want
+  object-lock/versioning at the bucket level, not attempted this session).
+- **`verifyAnchors()`** — replays every anchor ever written and confirms
+  the sequence it names still has the *same* `entry_hash` in the live
+  database today. This is the check `verifyChain()` alone cannot do: an
+  attacker who edits an old entry and recomputes every subsequent
+  `prev_hash`/`entry_hash` (a full chain rewrite) makes `verifyChain()`
+  pass again, because that method only replays the chain as it currently
+  stands — it has no memory of what the chain looked like *before* the
+  rewrite. Anchors are that memory, held outside the database the
+  attacker compromised.
 
-## MVP boundary checklist (`01-scope-and-non-goals.md`) — restated
+Two new commands:
 
-**Still 7 of 9**, unchanged by this session's own count — this session's
-work (R-02, R-06, R-07) closes long-standing operability gaps rather than
-completing a new checklist item. The two still-unchecked items are unchanged
-from Session 13-15: the audit-log external anchor (R-04) and the public demo
-instance/seeders. **The seeder half of that second item is now substantially
-done** (all 5 policies + a real working connector are seeded/registered by
-two real commands) — the remaining piece is the consent-purpose bootstrap,
-which this session's README explicitly reframes as genuine demo content a
-self-hoster configures themselves, not a gap.
+- **`app/Console/Commands/AnchorAuditChainCommand.php`** (`audit:anchor-chain`)
+  — registered on the scheduler (`routes/console.php`, hourly). ADR-0003's
+  Consequences section requires that anchor unavailability "must trigger
+  an alert, not fail silently" — this command never swallows a failure. A
+  storage write failure or any unexpected exception both log at
+  `Log::critical` (this project's existing convention for a fault an
+  operator must see — matching `PolicyEvaluator`'s fail-closed logging)
+  and exit non-zero. A successful anchor also writes its own
+  `audit.chain.anchored` audit-log entry, matching
+  `ExecuteRetentionPoliciesCommand`'s existing convention of self-logging
+  scheduled system actions.
+- **`app/Console/Commands/VerifyAuditChainCommand.php`** (`audit:verify-chain`)
+  — the runbook item ADR-0003's Consequences section explicitly calls
+  for ("chain verification becomes a documented runbook item ... it must
+  be run routinely, and its result must be visible"). Checks both
+  `verifyChain()` and `verifyAnchors()`, non-zero exit if either fails.
+
+**Cadence choice: hourly.** Nothing in this project's threat model
+(single-tenant, self-hosted, no stated SLA on detection latency) calls for
+a tighter cadence; hourly bounds the "unanchored window" (entries written
+since the last anchor, which a rewrite could still cover without
+`verifyAnchors()` catching it) to at most an hour, and `anchorChain()` is
+idempotent when the chain hasn't grown, so running it more often than the
+chain grows is harmless.
+
+### Proof, not assertion — the specific evidence requested
+
+`tests/Feature/AuditChainAnchorTest.php` (5 tests):
+
+1. **The core proof**: builds a real 3-entry chain via `AuditLogger::record()`,
+   anchors it (`Storage::fake('s3')`), then simulates a genuinely
+   privileged DB-access attacker — bypassing `AuditLogEntry`'s append-only
+   guard via `DB::table('audit_log_entries')->update()` (the same
+   technique `ConsentCaptureTest.php` already uses to simulate DB-level
+   tampering) — tampering with the *first* entry's `action` and correctly
+   recomputing every subsequent `prev_hash`/`entry_hash` using the exact
+   same hash formula `AuditLogger` uses, so the rewritten chain is
+   internally consistent. Asserts `verifyChain()` returns `valid: true`
+   (the rewrite fools it — this is the exact gap ADR-0003 describes) and
+   `verifyAnchors()` returns `valid: false` with `brokenAtSequence`
+   pointing at the anchored (latest) sequence, because that anchor was
+   written *before* the rewrite and still holds the original hash.
+   (First draft of this test asserted `brokenAtSequence` against the
+   *tampered* entry's sequence instead of the *anchored* entry's — wrong,
+   since `verifyAnchors()` only has anchors to check against, and there
+   was only one, at the latest sequence; caught by the test actually
+   failing on first run, not by inspection, and fixed.)
+2. `anchorChain()` on a fresh instance reports `no_entries` rather than
+   anchoring nothing silently.
+3. `anchorChain()` is idempotent — anchoring an unchanged chain twice
+   writes identical content to the same key, confirmed by asserting
+   exactly one file exists afterward.
+4. `AnchorAuditChainCommand` anchors successfully and records its own
+   `audit.chain.anchored` entry.
+5. `AnchorAuditChainCommand` alerts rather than fails silently — a bare
+   Storage stub is swapped in via `Storage::set('s3', ...)` to force
+   `put()` to return `false`, and the test asserts `Log::critical` was
+   called and the command exited non-zero.
+
+All five pass. 165/165 Feature tests total (160 carried over + these 5).
+Pint clean (152 files). Larastan level 8 clean (the return-shape docblocks
+needed care: `anchorChain()`'s return array uses uniform, always-present,
+nullable keys rather than PHPStan's optional-key (`?:`) shape syntax,
+specifically to avoid "offset may not exist" errors after narrowing on
+`anchored` — matching this codebase's existing pattern, seen in
+`ExportBundleController::raw()`, of explicitly null-checking
+`Storage::disk()->get()`'s nullable return rather than assuming it's
+always a string). ESLint clean (no frontend changes). OpenAPI unchanged
+and re-validated — these commands are CLI-only, deliberately not part of
+this application's documented HTTP API contract, the same reasoning
+Session 16 used for the reference connector's own webhook route.
+
+`01-scope-and-non-goals.md`'s MVP checklist item for "Tamper-evident audit
+log (hash chain, periodic anchor)" is now checked — 8 of 9 MVP boundary
+items are complete; only the public demo instance itself remains.
+
+## MVP boundary checklist — restated
+
+**8 of 9, up from 7 of 9.** R-04 (audit-log anchor) closed this session.
+The one remaining unchecked item is the public demo instance (isolated
+infrastructure, spend cap, scheduled reset) — its seeder half was already
+closed at Session 16 (R-02).
 
 ## What was explicitly NOT done this session, and why
 
-1. **R-01 — untouched, per ground rules.**
-2. **R-05 — not reopened, still closed** (Session 14). This session
-   authenticated via real `/login` HTTP calls (for the timing walkthrough)
-   but changed nothing in the login/logout/session code itself.
-3. **No ADR reopened.** ADR-0004's decision, options, and trade-offs are
-   unchanged; the reference connector is exactly what ADR-0004 already
-   called for ("a reference/stub connector built specifically to prove the
-   contract"), implemented for the first time, not redesigned.
-4. **GDPR-only/single-tenant/public-demo scope — untouched.**
-5. **R-08's root cause — not found**, only diagnosed and documented (see
-   above); fixing a test-infrastructure hang whose cause is genuinely
-   unknown was correctly out of this session's ability to responsibly
-   attempt further without more host-level access than a container shell
-   provides.
-6. **A registry-hosted prebuilt image for R-07's genuinely-first-build cost —
-   not attempted** (needs a registry + CI publishing step, out of scope).
-7. **Optional/stretch items from Session 15 (retention policy UI, RoPA
-   export button, policy management UI, audit log query view) — untouched,
-   unchanged, still API-only.** Not this session's priority per the brief's
-   own ordering (R-02/R-06/R-07 first).
+1. **R-01, R-02, R-05, R-06 — untouched, per ground rules.** All remain
+   closed/open exactly as Session 16 left them. Running `composer test`
+   and the manual walkthrough this session did re-exercise R-02's seeder
+   and R-06's reference connector as a side effect of normal use (they're
+   load-bearing for any DSAR flow to work at all), but nothing about their
+   code or tests changed.
+2. **No ADR reopened.** ADR-0003's Decision, options, and trade-offs are
+   unchanged — R-04 is exactly the anchoring layer the ADR already called
+   for, implemented for the first time, not redesigned.
+3. **R-08's underlying hang — not fixed.** Diagnosed further (a
+   specific, plausible mechanism identified) and its reproducibility
+   confirmed across two hosts, but not patched — see the risk register's
+   suggested next step (a minimal standalone Playwright-in-Docker
+   reproduction, no Pest/Laravel involved, to isolate whether Pest's own
+   process launching is implicated).
+4. **A registry-hosted prebuilt image for R-07's first-build cost — still
+   not attempted** (needs a registry + CI publishing step, out of scope
+   two sessions running now).
+5. **GDPR-only/single-tenant/public-demo scope — untouched.**
+6. **Optional/stretch items (retention policy UI, RoPA export button,
+   policy management UI, audit log query view) — untouched, still
+   API-only.** Not this session's priority; R-04's own `audit:verify-chain`
+   command is a CLI runbook tool, deliberately not a UI, matching how
+   retention/RoPA/policy management are already CLI/API-only.
 
 ## Files created or changed
 
-**Backend:** `app/Http/Controllers/ReferenceConnectorWebhookController.php`
-(new — the real reference/stub connector), `app/Console/Commands/
-RegisterReferenceConnectorCommand.php` (default `webhook_url` now points at
-the real route via the new config value), `config/connectors.php` (new
-`reference_connector_base_url`), `routes/api.php` (new
-`POST /api/reference-connector/webhook`), `database/seeders/
-PolicyDefinitionSeeder.php` and `DatabaseSeeder.php` (new — R-02).
+**Backend (R-04):** `app/Services/AuditLogger.php` (new `anchorChain()`/
+`verifyAnchors()`, `ANCHOR_DISK`/`ANCHOR_PATH_PREFIX` constants),
+`app/Console/Commands/AnchorAuditChainCommand.php` (new),
+`app/Console/Commands/VerifyAuditChainCommand.php` (new),
+`routes/console.php` (hourly schedule registration for the anchor job,
+header comment updated).
 
-**Infrastructure:** `docker/Dockerfile` (Playwright/npm layer reordered
-before `COPY . .`), `docker-compose.yml` (`worker` reuses `app`'s tagged
-image instead of building its own), `.env` / `.env.example`
-(`REFERENCE_CONNECTOR_BASE_URL`).
+**Testing:** `tests/Feature/AuditChainAnchorTest.php` (new — 5 tests,
+including the full-chain-rewrite attack simulation).
 
-**Testing:** `tests/Feature/ReferenceConnectorWebhookTest.php` (new — proves
-`complete`, not `partially_complete`, via real production classes chained
-through real HTTP-shaped hops), `tests/Feature/
-RegisterReferenceConnectorCommandTest.php` (new case for the default
-`webhook_url`).
+**Docs:** `docs/project-memory/10-risk-register.md` (R-07 re-measured with
+a real cold-clone number and the Part A reasoning; R-08 upgraded from
+"unknown, check on a different host" to "confirmed to reproduce, likely
+structural, manual-walkthrough fallback established"; R-04 closed with
+full evidence), `docs/project-memory/01-scope-and-non-goals.md` (audit-log
+checklist item checked, 8/9 restated, a stale "no seeders directory"
+sentence from Session 13 corrected), this file.
 
-**Docs:** `README.md` (step 0 uses real seeder/command instead of tinker for
-policies/connector; step 4 describes `complete` as the real outcome),
-`docs/project-memory/10-risk-register.md` (R-02 and R-06 closed with full
-evidence, R-07 updated with measured mitigation results and an honest
-cold-build caveat, new R-08 for the browser-test hang), this file.
+**Infrastructure:** none changed this session — R-07's Dockerfile/compose
+fixes are Session 16's; this session only re-measured them on a different
+host.
 
 ## Validation performed
 
-- `docker compose exec app composer test` → **160/160 passed** (up from 157;
-  +3 new tests this session), re-run once after a mid-session test fix (the
-  `Http::fake()`-ordering lesson noted above) — clean both relevant runs.
-- `docker compose exec app composer test:e2e` → **could not complete**, see
-  R-08 above. Four independent attempts, all hung before any page
-  navigation.
-- `composer lint` (Pint) → clean, 149 files.
+- `docker compose exec app composer test` → **165/165 passed** (160
+  carried over + 5 new), re-run after fixing a bug in the anchor test's
+  own first draft (a wrong sequence-number assertion, caught by the test
+  actually failing, not by review) — clean on the second run.
+- `composer lint` (Pint) → clean, 152 files.
 - `composer analyse` (Larastan level 8) → no errors.
 - `npm run lint` (ESLint) → clean.
 - `docs/architecture/openapi.yaml` validated with `openapi_spec_validator`
-  (throwaway `python:3.12-slim` container) → **OK**, unchanged (no new
-  documented endpoints — the reference connector's own webhook route is
-  deliberately not part of this application's documented API contract, since
-  a real connector wouldn't implement its own receiver against this spec).
-- No rollback-parity concern — no new migrations this session.
-- **The full timing walkthrough was manually, honestly re-run against the
-  real running docker-compose stack** — see the dedicated section above.
-  This is what surfaced both the real 46-second completion time and the
-  genuine 30-second first-attempt timeout finding.
-- **Not yet pushed** — awaiting confirmation before push, per this project's
-  established pattern.
+  (throwaway `python:3.12-slim` container) → **OK**, unchanged.
+- `composer test:e2e` / `vendor/bin/pest tests/Browser -v` → **hung**,
+  same as Session 16; see Part B above for the full investigation,
+  process-tree evidence, and the manual-walkthrough substitute.
+- **A genuinely cold Docker build was measured end-to-end this session**
+  (2083s) — see Part A above.
+- **A real manual walkthrough was run against the live docker-compose
+  stack** re-confirming Sessions 14/15's login and admin-button backend
+  claims — see Part B above.
+- No rollback-parity concern — R-04 added no migrations (anchors live on
+  external object storage, not in a new table).
+- **Not yet pushed** — awaiting confirmation before push, per this
+  project's established pattern.
 
 ## Open questions and risks
 
 - **R-01 — unchanged, still open.**
-- **R-02 — closed this session.**
-- **R-04 — unchanged, still open. Now the top-priority remaining item** (see
-  "Next recommended session").
-- **R-05 — unchanged, still closed** (Session 14).
-- **R-06 — closed this session**, with two independent lines of proof (a
-  real Feature test and a real cross-container manual walkthrough).
-- **R-07 — open, partially mitigated.** Both identified root causes for
-  *repeat* build cost are fixed and verified (165s for an ordinary rebuild,
-  down from a 15-18-minute layer paid twice). The genuinely-first-ever-build
-  cost is unavoidable without a registry-hosted image, not attempted this
-  session, and this session's own attempt to cleanly measure it was
-  confounded by a sandbox-specific anomaly (see the honest caveat above).
-- **R-08 — new, open.** Browser/E2E suite hung this session; assessed as
-  environment-specific, not a product regression, but unconfirmed until a
-  future session checks reproducibility on a different host.
+- **R-02, R-05, R-06 — unchanged, still closed** (Sessions 14/16).
+- **R-04 — closed this session**, with a real attack-simulation test as
+  evidence, not an assertion.
+- **R-07 — still open.** Both of Session 16's fixes re-confirmed correct
+  and structural (not cache-state-dependent); a real first-ever cold-clone
+  number now exists (2083s) and confirms the residual risk to Success
+  Metric #1's 15-minute budget is real, not merely theoretical. A
+  registry-hosted prebuilt image remains the only identified full fix,
+  still unattempted.
+- **R-08 — still open, no longer ambiguous.** Confirmed to reproduce on a
+  second, unrelated host with an identical signature — the
+  "sandbox-specific" hypothesis is rejected. A specific, plausible (not
+  proven) mechanism was identified (CDP pipe-transport fd inheritance
+  across an intermediate shell layer in Playwright's own launch chain). A
+  manual walkthrough substitutes for the automated proof this session,
+  with an explicit, checked scope limit: it re-confirms the backend
+  contract behind Sessions 14/15's login/button claims, but cannot and
+  does not confirm real browser DOM rendering or real click-driven
+  interaction.
 - **Optional/stretch items (retention UI, RoPA export button, policy
-  management UI, audit log view) — all still open, all API-only**, unchanged
-  from Session 15.
+  management UI, audit log view) — all still open, all API/CLI-only**,
+  unchanged from Session 15/16.
 
 ## Next recommended session
 
-**R-04 (audit-log periodic anchor, ADR-0003's remaining half) is now the
-clearest single next priority.** With R-02 and R-06 closed this session, the
-demo/onboarding path that was blocking real usability is in materially
-better shape (a fresh instance now genuinely works, buttons-only, reaching a
-real `complete`) — R-04 is the next thing standing between this project and
-a defensible "yes, this actually does what it claims" for the security
-properties ADR-0003 describes, and it's been open and correctly deferred
-since Session 3.
+**Two independent, lower-cost leads, either order:**
 
-A close second, lower-cost check: **confirm R-08 (browser-test hang)
-reproduces or doesn't on a different host before doing anything else with
-it** — if a fresh checkout on different infrastructure runs
-`composer test:e2e` cleanly, R-08 can be closed immediately as sandbox-
-specific with no further work.
+1. **Try to actually root-cause or work around R-08.** The suggested next
+   step: reproduce the CDP-pipe hang with a *minimal* standalone
+   Playwright script inside the same container image (no Pest, no
+   Laravel) — if it *also* hangs, the issue is Playwright-in-this-Docker-
+   setup generally, and the fix (if one exists) would be forcing a
+   non-pipe CDP transport, or documenting this as a known, permanent
+   constraint of running headless Chromium in this specific container
+   base image. If the minimal script *doesn't* hang, the issue is
+   specific to how `pest-plugin-browser` launches `playwright run-server`,
+   narrowing the search considerably.
+2. **A registry-hosted prebuilt image for R-07.** Would need a container
+   registry and a CI publishing step (GitHub Actions building and pushing
+   `privacy-forge-app` on merge to `main`) — genuinely out of a single
+   session's scope to set up *and* verify, but now clearly justified: a
+   34.7-minute first build is a real, measured barrier to Success Metric
+   #1 for any stranger cloning this repository fresh, not a theoretical
+   one.
+
+Either could reasonably be the sole focus of the next session; both are
+independent of R-01 (the other remaining open risk) and don't block it.
 
 - Inputs required: this file, `docs/project-memory/10-risk-register.md`
-  (R-01/R-04/R-08), `docs/adr/ADR-0003-audit-log-tamper-evidence.md`.
+  (R-01/R-07/R-08).
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 16
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 17
 complete, **not yet pushed** (awaiting confirmation).
 
 **Current stack:** unchanged since Session 13 — Laravel 12, Vue 3/Inertia,
 PostgreSQL, Redis, S3-compatible storage, `barryvdh/laravel-dompdf`,
-`pestphp/pest-plugin-browser`. No new dependencies this session.
+`pestphp/pest-plugin-browser`. No new dependencies this session — R-04
+reuses the existing `s3` filesystem disk and Laravel's own scheduler.
 
 **Architecture decisions that must not be reversed:** all decisions from
-Sessions 0-15 remain in force. No ADR touched or reopened this session — the
-reference connector is ADR-0004's own already-specified deliverable, built
-for the first time.
+Sessions 0-16 remain in force. No ADR touched or reopened this session —
+R-04 is ADR-0003's own already-specified anchoring layer, implemented for
+the first time.
 
 **Implementation state:**
-- Done: everything from Session 15, plus: a real, working reference/stub
-  connector (`ReferenceConnectorWebhookController`) that makes a fresh
-  instance's first erasure DSAR genuinely reach `complete`; a real
-  `PolicyDefinitionSeeder` seeding all 5 ABAC policies; two real Docker
-  build-time fixes (layer reordering + eliminating a duplicate `app`/
-  `worker` build) cutting a repeat rebuild from a 15-18-minute layer paid
-  twice down to ~165 seconds; an honestly re-measured ~75-second scripted
-  walkthrough that, for the first time, actually reaches `complete`.
+- Done: everything from Session 16, plus: a real periodic audit-log
+  anchor (`AuditLogger::anchorChain()`/`verifyAnchors()`, scheduled hourly,
+  proven against a real full-chain-rewrite attack simulation); a real,
+  directly-measured first-ever cold-Docker-build number (2083s); a
+  confirmed-not-sandbox-specific diagnosis of the browser-suite hang, with
+  a real manual walkthrough substituting for it this session.
 - In progress: nothing mid-flight.
 - **Known gaps to check first:** (1) R-01 — DB-level grant revocation for
-  the audit log unbuilt; (2) R-04 — the audit-log external chain-anchor is
-  unbuilt, now the top recommended priority; (3) R-07 — a genuinely
-  first-ever cold clone's first Docker build still has an unavoidable,
-  unmitigated ~15-18+ minute Chromium download; (4) R-08 — the browser/E2E
-  test suite hung this session on this sandbox, cause unconfirmed, check
-  reproducibility on a different host before trusting or distrusting it; (5)
-  no password reset flow; (6) retention/RoPA/policy/audit-log management UIs
-  (Session 15's stretch items 6-9) remain API-only.
-- Not started: the audit-log periodic anchor (R-04), a registry-hosted
-  prebuilt image (R-07's remaining half), connector secret rotation, HTTP
-  connector-management (deliberately deferred), email/notification delivery,
-  password reset, the `RetentionPolicyController::store` duplicate-active-
-  policy validation gap (Session 12 finding, still open), retention/RoPA/
-  policy/audit-log management UIs.
+  the audit log unbuilt; (2) R-07 — a genuinely first-ever cold clone
+  takes ~34.7 minutes on this session's host, over 2x Success Metric #1's
+  budget, and no registry-hosted prebuilt image exists yet; (3) R-08 — the
+  browser/E2E suite hangs on at least two independent hosts, cause
+  narrowed but not fixed; a manual walkthrough is the current fallback for
+  re-confirming button-driven claims after future changes; (4) no password
+  reset flow; (5) retention/RoPA/policy/audit-log management UIs remain
+  API/CLI-only.
+- Not started: a registry-hosted prebuilt image (R-07), a fix or
+  workaround for R-08's underlying CDP-pipe hang, connector secret
+  rotation, HTTP connector-management (deliberately deferred), email/
+  notification delivery, password reset, the
+  `RetentionPolicyController::store` duplicate-active-policy validation
+  gap (Session 12 finding, still open), retention/RoPA/policy/audit-log
+  management UIs, the public demo instance's isolated infrastructure/spend
+  cap/scheduled reset (the one remaining unchecked MVP item).
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the
-2-new-technology cap (ABAC, ASVS L2) — nothing this session introduced a new
-architectural pattern or dependency (the reference connector reuses the
-existing Laravel HTTP client and routing; the seeder uses Laravel's own
-seeder mechanism).
+2-new-technology cap (ABAC, ASVS L2) — R-04 introduced no new
+architectural pattern or dependency (it reuses the existing `s3`
+filesystem disk and Laravel's scheduler, both already in use).
 
-**Task for next session (single objective):** R-04 (audit-log periodic
-anchor) is the recommended default — see "Next recommended session" above.
-A quick, independent, much cheaper check (R-08 reproducibility on a
-different host) can be done first or in parallel if convenient.
+**Task for next session (single objective):** either root-cause/work
+around R-08's CDP-pipe hang, or begin a registry-hosted prebuilt image for
+R-07 — see "Next recommended session" above for the reasoning behind
+both. R-01 remains open and available as a third option if neither fits.
 
 **Files to attach or paste:**
 - `docs/project-memory/12-session-handoff.md` (this file)
-- `docs/project-memory/10-risk-register.md` (R-01/R-04/R-08)
-- `docs/adr/ADR-0003-audit-log-tamper-evidence.md`
+- `docs/project-memory/10-risk-register.md` (R-01/R-07/R-08)
 
 **Ground rules:** Do not change the stack. Do not reopen any existing ADR.
-R-01/R-04/R-07 (partially)/R-08 remain open — do not fold a fix in silently.
-R-02/R-06 are closed — do not reopen without a genuine new finding.
+R-01/R-07/R-08 remain open — do not fold a fix in silently. R-02/R-04/R-05/
+R-06 are closed — do not reopen without a genuine new finding.

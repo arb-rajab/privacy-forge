@@ -6,10 +6,11 @@
 ## MVP boundary (in scope)
 
 **Checked item-by-item against the actual codebase, Session 13
-(2026-08-18)** — not re-asserted from memory. 7 of 9 items are now
-genuinely complete; the remaining two are independent, narrower gaps
-(the audit-log anchor job; the demo instance/seeders) rather than the
-single shared "no frontend" root cause Session 12 found.
+(2026-08-18)** — not re-asserted from memory. **8 of 9 items are now
+genuinely complete as of Session 17** (the audit-log anchor closed this
+session, R-04); the remaining item (the demo instance/seeders) is an
+independent, narrower gap rather than the single shared "no frontend"
+root cause Session 12 found.
 
 - [x] Consent registry: purposes, lawful bases, versioned consent notices,
       capture API + embeddable widget, withdrawal. **Complete.** US-001–004
@@ -51,16 +52,17 @@ single shared "no frontend" root cause Session 12 found.
       asks for "register with export," not a dashboard — v1 deliberately
       ships an export, not a visualisation UI (see "Deferred to backlog"
       below).
-- [ ] Tamper-evident audit log (hash chain, periodic anchor). **Hash chain
-      complete** (ADR-0003, Session 7-ish — entries are hash-chained and
-      tamper detection is tested). **Not done: the periodic external
-      anchor.** `routes/console.php`'s own comment states this plainly
-      ("The audit-log anchor... remain[s] unbuilt"); confirmed this
-      session — no anchoring job/command exists anywhere in `app/Console`
-      or `app/Services`. Entry-level tamper detection is real; the
-      stronger guarantee ADR-0003 describes (protection against a
-      sufficiently privileged attacker who edits entries *and*
-      recomputes the chain) is not yet in place.
+- [x] Tamper-evident audit log (hash chain, periodic anchor). **Complete
+      as of Session 17 (R-04).** Hash chain was already complete
+      (ADR-0003, Session 7-ish). The periodic external anchor
+      (`AuditLogger::anchorChain()`/`verifyAnchors()`, scheduled hourly via
+      `audit:anchor-chain`, `routes/console.php`) is now built and proven
+      with a real full-chain-rewrite attack simulation
+      (`tests/Feature/AuditChainAnchorTest.php`) — `verifyChain()` alone is
+      fooled by a DB-level attacker who edits an entry and recomputes every
+      subsequent hash; `verifyAnchors()` catches it, because the anchor was
+      written to external (`s3` disk) storage before the rewrite happened.
+      See `10-risk-register.md`'s R-04 closure entry for full detail.
 - [x] ABAC authorisation across all of the above, with every decision logged
       against the policy ID that produced it. Complete — five sensitive
       actions registered and exhaustively tested (`dsar.identity.verify`,
@@ -72,23 +74,31 @@ single shared "no frontend" root cause Session 12 found.
 - [x] GDPR/UK-GDPR regulatory frame only. Complete — no CCPA (or any other
       jurisdiction's) rule path exists anywhere in the codebase.
 - [ ] A public demo instance running on synthetic seed data, in isolated
-      infrastructure, with a spend cap. **Not done.** Confirmed this
-      session: there is no `database/seeders/` directory at all in the
-      repository, and `docs/project-memory/08-deployment-and-operations.md`
-      is an entirely unwritten stub (every section header, including
-      "Backup and restore" and "Capacity and cost notes," has no content
-      under it) — despite `03-architecture.md` stating restore drills were
-      "recorded in `08-deployment-and-operations.md` (Session 8)." That
-      specific cross-reference does not hold; flagged here rather than
-      silently left for a future session to discover the same way the
-      Session 8 TTL-testing claim was checked and clarified at Session 11.
+      infrastructure, with a spend cap. **Still not done, but the seeder
+      half is now closed (R-02, Session 16):** `database/seeders/
+      PolicyDefinitionSeeder.php` + `DatabaseSeeder.php` now seed all five
+      ABAC policies on `php artisan db:seed` — the sentence previously here
+      claiming no seeders directory existed at all is now stale and has
+      been corrected. What remains undone is the demo-instance-specific
+      part: isolated infrastructure, a spend cap, and a scheduled reset —
+      none of that exists, and `docs/project-memory/
+      08-deployment-and-operations.md` is still an entirely unwritten stub
+      (every section header, including "Backup and restore" and "Capacity
+      and cost notes," has no content under it) — despite
+      `03-architecture.md` stating restore drills were "recorded in
+      `08-deployment-and-operations.md` (Session 8)." That specific
+      cross-reference does not hold; flagged here rather than silently left
+      for a future session to discover the same way the Session 8
+      TTL-testing claim was checked and clarified at Session 11.
 
 This list is the literal checklist for "MVP complete" — see the Definition
-below. **As of Session 13: 7 of 9 items are genuinely complete; the
-remaining 2 are independent, narrower gaps (the audit-log anchor job,
-R-04; the demo instance/seeders, R-02) — the "no frontend" root cause
-Session 12 found is closed. The project is closer to MVP-complete than
-at any prior session, but cannot yet be credibly called MVP-complete per
+below. **As of Session 17: 8 of 9 items are genuinely complete; the
+remaining item is the public demo instance itself** (isolated
+infrastructure, spend cap, scheduled reset — the seeder half of this item
+closed at Session 16 via R-02). The "no frontend" root cause Session 12
+found remains closed, and the audit-log anchor (R-04) closed this session.
+The project is closer to MVP-complete than at any prior session, but
+cannot yet be credibly called MVP-complete per
 its own Definition below, specifically condition 1 ("every box...
 checked and demonstrably working end-to-end").**
 
