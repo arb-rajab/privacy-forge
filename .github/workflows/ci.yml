@@ -92,6 +92,13 @@ jobs:
           REDIS_HOST: 127.0.0.1
 
   e2e:
+    # This job runs directly on the GitHub-hosted runner (setup-php,
+    # setup-node, npx playwright install below) — it never builds or uses
+    # docker/Dockerfile at all. So Session 18's runtime/test Dockerfile
+    # split (R-07, docs/project-memory/10-risk-register.md — removing
+    # Playwright/Chromium from the image `docker compose up` builds and
+    # runs) has no effect here one way or the other; noted so a future
+    # session doesn't assume this job needs updating to match.
     name: End-to-end (consent widget + DSAR portal, Pest Browser Testing)
     runs-on: ubuntu-latest
     services:

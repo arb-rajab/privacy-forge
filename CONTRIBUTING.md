@@ -65,10 +65,23 @@ doesn't, `docker compose logs app` is the first place to look.
 
 ```bash
 docker compose exec app composer test      # Pest
-docker compose exec app composer test:e2e  # Pest Browser Testing (consent widget + DSAR portal, tests/Browser/)
 docker compose exec app composer lint      # Pint (add --fix to auto-fix)
 docker compose exec app composer analyse   # Larastan / PHPStan, level 8
 docker compose exec frontend npm run lint
+```
+
+**Pest Browser Testing** (`tests/Browser/`, the consent widget + DSAR portal
+E2E suite) needs Node.js, npm, and a real downloaded Chromium — tooling the
+default `app` container deliberately does not have (R-07,
+`docs/project-memory/10-risk-register.md`, Session 18: bundling it into the
+image every self-hoster's `docker compose up` builds and runs was itself a
+meaningful chunk of a first-ever cold clone's build time, paid by people who
+will never run this suite). It lives in a separate `app-e2e` Compose service,
+built from the same Dockerfile's `test` target, behind a profile so it's
+never built or started by a plain `docker compose up`/`up --build`:
+
+```bash
+docker compose --profile e2e run --rm app-e2e composer test:e2e
 ```
 
 **Validating the API contract** (`docs/architecture/openapi.yaml`) after

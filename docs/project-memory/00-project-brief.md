@@ -1,7 +1,9 @@
 # Project Brief
 > Purpose: the single source of truth for what this project is and why it exists.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-10
+> Last updated: 2026-08-17 (Session 18 — Success Metric #1 wording revised;
+> see `09-decision-log.md` for the reasoning. Nothing else in this document
+> changed.)
 > Status: FINALISED — Session 1 (Discovery & Business Framing)
 
 ## One-line description
@@ -74,9 +76,29 @@ Disposal), rather than to volume of screens.
   is recorded here so a later session cannot quietly relax it.
 
 ## Success metrics
-1. A stranger can self-host `privacy-forge` and complete a full
-   consent → withdrawal → DSAR → export cycle, starting from the README
-   alone, in under 15 minutes.
+1. **Revised at Session 18 (2026-08-17, see decision log) — the original
+   wording collapsed three different things into one 15-minute number.**
+   Restated as three separate, honestly measurable claims:
+   1. **Reviewer path (public hosted demo):** a reviewer using the public
+      demo instance never clones or builds anything locally — this
+      metric's timing does not apply to that path.
+   2. **Self-hoster environment setup (one-time):** a stranger's first
+      `docker compose up --build`, from a true cold clone, completes in
+      a real, directly measured time on a representative host — **~643
+      seconds (~10.7 minutes)** as of Session 18 (down from a confirmed
+      ~2083s/~34.7 min before that session's Dockerfile split removed
+      browser-testing tooling from the default build path; see
+      `10-risk-register.md`'s R-07). This number varies by host/network
+      and is not a universal constant.
+   3. **Product walkthrough (once the environment is running):** a
+      stranger completes a full consent → withdrawal → DSAR →
+      export/erasure cycle, starting from the README's walkthrough
+      alone, comfortably under 15 minutes — based on measured backend
+      latency for every step (Session 18: 57s for the full bootstrap
+      sequence, sub-second for each individual API call, ~46s for the
+      DSAR's async worker/connector round trip per Session 16), not yet
+      confirmed against a real human clicking through a real browser
+      end-to-end (see R-08).
 2. 100% of MVP acceptance criteria in `02-requirements.md` trace to a
    specific GDPR article in the Requirements Traceability Matrix (target
    articles: 6, 7, 12–15, 17, 20, 30).

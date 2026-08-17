@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-17
+> Last updated: 2026-08-17 (Session 18)
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -367,3 +367,103 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   "for consistency" would misrepresent this repository's deliberately
   narrow scope and blur the public/private boundary with PR02, which this
   repo's non-goals explicitly guard against.
+
+## Revision: Success Metric #1's wording conflated three different things under one 15-minute number (Session 18, 2026-08-17)
+
+- **Finding.** `00-project-brief.md`'s Success Metric #1 read: "A stranger
+  can self-host `privacy-forge` and complete a full consent → withdrawal →
+  DSAR → export cycle, starting from the README alone, in under 15
+  minutes." Read literally, that single number was being asked to cover
+  three genuinely different things at once: (1) a reviewer's experience,
+  for whom Session 1 already decided a **public hosted demo instance**
+  would exist specifically so most reviewers never clone or build
+  anything locally (see this brief's own "Demo/hosting decision" —
+  already on record, not a new decision here); (2) a genuine self-hoster's
+  **one-time Docker environment build**, which Session 17 measured
+  directly at 2083s (~34.7 min) on a real cold clone — more than double
+  the budget, on the build alone, before any product interaction starts;
+  (3) the **actual product walkthrough** (consent → withdrawal → DSAR →
+  export/erasure) once that environment is already running — a
+  fundamentally different, much smaller quantity that Session 17 never
+  separately measured. Collapsing all three into one number meant the
+  metric was simultaneously unverifiable for the reviewer case (no local
+  build was ever the point) and, per Session 17's own direct measurement,
+  already falsified for the self-hoster case — while the one thing most
+  directly within this codebase's control (the product's own UX latency)
+  had no honest number of its own to point to.
+- **What this session did about the underlying build-time number, before
+  revising the metric's wording.** R-07's ~35-minute figure turned out to
+  be dominated by `docker/Dockerfile` bundling Node.js, npm, Playwright,
+  and a real downloaded Chromium into the *same* image
+  `docker-compose.yml`'s `app`/`worker` services build and run by default
+  — tooling only `pestphp/pest-plugin-browser`'s `tests/Browser/` suite
+  ever uses, never application code at runtime. Split into a multi-stage
+  Dockerfile (`runtime` — default, no browser-testing tooling at all —
+  and `test` — Node/Playwright/Chromium, built only by a new
+  Compose-profile-gated `app-e2e` service). Re-measured on the same class
+  of host Session 17 used (Windows 11 + Docker Desktop/WSL2), with the
+  identical rigour (`docker compose down`, `docker rmi -f` on all project
+  images, `docker builder prune -af`, confirmed 0B cache/0 project images,
+  then a single bracketed `docker compose up --build -d`): **643 seconds
+  (~10.7 minutes)**, down from 2083s — a genuine ~69% reduction, achieved
+  by removing tooling nobody running the plain app ever needed, not by
+  loosening the measurement's rigour. This is now *under* budget on its
+  own, though the margin (using ~11 of the 15 minutes on environment setup
+  alone) is not generous. Full reasoning, including a genuine
+  `composer.lock` platform-requirement bug this split surfaced
+  (`ext-sockets`/`ext-pcntl` were required by a plain `composer install`
+  purely because `pestphp/pest-plugin-browser` is a `require-dev`
+  dependency, even though the `runtime` target never has those
+  extensions), is in `10-risk-register.md`'s R-07 entry.
+- **What this session measured for the product-walkthrough number, and
+  what it explicitly could not cleanly measure.** Against the freshly
+  rebuilt `runtime` stack, a real, continuous, single bracketed run of
+  the README's step-0 bootstrap (`migrate` → `db:seed` →
+  `connectors:register-reference` → create consent purpose → create two
+  Owner accounts) measured **57 seconds**. Every individual
+  product-cycle HTTP call after that (consent grant, DSAR erasure submit,
+  admin login × 2, verify-identity, approve-erasure) returned in well
+  under a second each, checked directly via curl timing, not assumed.
+  This session also attempted to re-time the DSAR's asynchronous
+  completion (the worker/reference-connector round trip, previously
+  measured cleanly at Session 16 as ~46 real seconds) but the attempt was
+  contaminated by this session's own multi-turn tool-call gaps between
+  the approve-erasure call and the first completion poll — by the time
+  polling started, the job had plausibly already finished in the
+  background, so the ~35s this session recorded for that interval is not
+  a trustworthy measurement of the async round trip itself and is
+  explicitly **discarded, not reported as a real number** — the same
+  discipline Session 17 used when it rejected Session 16's own flawed
+  ~13-hour build-time anomaly rather than record it as real. Session 16's
+  clean ~46-second figure remains the trustworthy number for that specific
+  interval.
+- **Decision — Success Metric #1's wording is revised** to separate the
+  three things the old wording conflated, rather than edited quietly:
+  1. **Reviewer experience (public hosted demo):** no local build
+     required; this metric's timing does not apply to this path at all —
+     it exists so most reviewers never need it to.
+  2. **Self-hoster environment setup (one-time):** a real, directly
+     measured cold Docker build now taking ~643s (~10.7 min) on a
+     representative host, down from a confirmed ~2083s (~34.7 min) before
+     this session's Dockerfile split — this number is expected to vary by
+     host/network and is not claimed as a universal constant, matching
+     Session 17's and 16's own caveats about this figure.
+  3. **Product walkthrough (once the environment exists):** the
+     consent → withdrawal → DSAR → export/erasure cycle itself. Cleanly
+     measured pieces (57s bootstrap; each API call sub-second; ~46s async
+     connector completion, Session 16) sum to low single digits of
+     minutes of actual backend latency — comfortably under 15 minutes on
+     that basis alone. A real human's click-through time (reading each
+     README step, typing form values, waiting for page loads) was **not**
+     stopwatch-measured against a real browser this session — R-08 (below)
+     is exactly why — so "well under 15 minutes" for this specific piece
+     is a reasoned characterisation from measured backend latency, not a
+     claim this session watched a real person complete in that time.
+  See `00-project-brief.md`'s Success Metric #1 for the revised wording
+  itself.
+- **Not an ADR.** No existing ADR made a commitment this reopens — the
+  public-demo decision (Session 1) and the GDPR-only/single-tenant scope
+  are both left exactly as they were; this is a correction to one
+  success-metric's wording so it asks a question this project can actually
+  answer, following the same "correction, not a new architecture
+  decision" pattern as the Owner-row fix at Session 10.

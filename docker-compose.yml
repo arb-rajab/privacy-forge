@@ -14,17 +14,18 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      # R-07 (docs/project-memory/10-risk-register.md, Session 18): the
+      # `runtime` target has no Node.js/npm/Playwright/Chromium — that
+      # tooling exists only in the `test` target, built and run via the
+      # `app-e2e` service below. A first-ever `docker compose up --build`
+      # never pays for browser-testing tooling it will never use.
+      target: runtime
     image: privacy-forge-app:latest
     ports:
       - "8000:8000"
     volumes:
       - .:/var/www/html
       - /var/www/html/vendor
-      # Same shadowing problem the vendor volume above solves, for the
-      # image's npm-installed playwright + downloaded Chromium (see
-      # docker/Dockerfile) — without this, the host bind mount's
-      # node_modules-less checkout would hide the image's own install.
-      - /var/www/html/node_modules
     environment:
       - DB_HOST=postgres
       - REDIS_HOST=redis
@@ -59,12 +60,14 @@ services:
     # R-07 (docs/project-memory/10-risk-register.md): `worker` used to
     # declare its own `build:` block, identical in every instruction to
     # `app`'s — on a cold cache, `docker compose up --build` built the
-    # same ~15-20 minute Playwright/Chromium layer twice, in parallel,
-    # roughly doubling first-build cost for no benefit (the two images
-    # are byte-identical; only the `command:` below differs). Reusing
-    # `app`'s tagged image means only one build ever runs; Compose still
-    # rebuilds it (once) whenever `docker compose up --build` is used,
-    # since `app` above still owns the real `build:` section.
+    # same layer twice, in parallel, roughly doubling first-build cost for
+    # no benefit (the two images are byte-identical; only the `command:`
+    # below differs). Reusing `app`'s tagged image means only one build
+    # ever runs; Compose still rebuilds it (once) whenever `docker compose
+    # up --build` is used, since `app` above still owns the real `build:`
+    # section. Since Session 18, `app`'s image is the lean `runtime`
+    # target (no Playwright/Chromium at all), so `worker` inherits that
+    # too — it never needed browser-testing tooling in the first place.
     image: privacy-forge-app:latest
     command: ["php", "artisan", "queue:work", "--tries=3"]
     volumes:
@@ -78,6 +81,46 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  app-e2e:
+    # R-07 (docs/project-memory/10-risk-register.md, Session 18): the only
+    # service that builds the `test` Dockerfile target (Node.js, npm,
+    # Playwright/Chromium). Behind a Compose profile so `docker compose
+    # up`/`up --build` (no flags) never builds or starts it — a stranger
+    # running the app pays nothing for tooling only pestphp/pest-plugin-
+    # browser's tests/Browser/ suite needs. Run explicitly: `docker
+    # compose --profile e2e run --rm app-e2e composer test:e2e` (see
+    # CONTRIBUTING.md).
+    profiles: ["e2e"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: test
+    image: privacy-forge-app-e2e:latest
+    # R-08 (docs/project-memory/10-risk-register.md, Session 18): headless
+    # Chromium's GPU/compositor process needs real shared memory; Docker's
+    # default /dev/shm is only 64MB, and Playwright's own Docker guidance
+    # (https://playwright.dev/docs/docker) names this as a documented
+    # cause of exactly the symptom Session 17 observed — a full Chromium
+    # process tree spawns and then makes no further progress. Part of this
+    # session's single targeted attempt at R-08; see the risk register for
+    # whether it actually fixed the hang.
+    shm_size: "1gb"
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/vendor
+      - /var/www/html/node_modules
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   postgres:
