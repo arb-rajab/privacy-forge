@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-18 (Session 22)
+> Last updated: 2026-08-18 (Session 24)
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -725,3 +725,241 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
 - **Not an ADR.** No ADR ever specified a production image design; this
   is `B-06` finally being built, per Session 22's own filing of it as
   backlog/build work, not a governance decision.
+
+## Demo/hosting decision revised: real infrastructure explicitly descoped for this portfolio build (Session 24, 2026-08-18)
+
+- **Decision, stated plainly, recorded before any other work this
+  session.** Session 1's original decision (`00-project-brief.md`,
+  "Demo/hosting decision") committed to a **live, public-facing hosted
+  demo instance** — real cloud spend, a real domain, a real box someone
+  else could visit. This session revises that: **actually provisioning
+  and paying for real public infrastructure is out of scope for this
+  portfolio build.** Deployment readiness is instead demonstrated via a
+  fully worked local/simulated deployment, run against placeholder
+  infrastructure values (a fake domain, self-signed TLS standing in for
+  real ACME issuance) — proving the deployment automation and every
+  demo-safety control that doesn't itself require real infrastructure,
+  without actually paying for or exposing a live box.
+- **Why now, and why this is the right call, not a shortcut.** This
+  repository's own stated purpose (`00-project-brief.md`'s "why this is
+  worth building as a portfolio piece") is demonstrating Requirements
+  Analysis and Retirement/Handover/Disposal rigour — not running a
+  funded product with an ongoing operations budget. A permanently-live
+  public demo instance requires indefinite real cloud spend with no
+  revenue behind it, for a marginal credibility gain over a rigorously
+  proven local deployment: a reviewer reading this repository's evidence
+  (this decision, the verification account below, the working
+  automation) can already make the same trust judgement `00-project-
+  brief.md`'s own "portfolio context" stakeholder note asks for, without
+  this project needing to actually operate a public service indefinitely.
+  Session 23 already found, directly, that no cloud account or
+  provisioning CLI exists in this environment — this decision resolves
+  that blocker by descoping the requirement, rather than by leaving it
+  perpetually "blocked, waiting for a human with credentials."
+- **What this does not change — the Demo Instance Data Safety CODE
+  controls remain real, tested, and are exactly what this session proves
+  out.** Scheduled reset (`demo:reset`), connector registration being
+  genuinely compiled out (no HTTP registration endpoint anywhere), the
+  warning banner (`demoMode` shared Inertia prop), and the `DEMO_MODE`
+  flag itself are unchanged as *designs* — this session verifies all four
+  work against a real running deployment, it does not weaken or remove
+  any of them. Only the fifth control (infrastructure isolation/spend
+  cap) and the underlying "is this instance live and public" question are
+  affected, and both are marked explicitly not-applicable under this
+  decision, not silently dropped — see `06-security-threat-model.md`'s
+  updated implementation-status table.
+- **What is NOT reopened by this decision.** GDPR/UK-GDPR-only scope,
+  single-tenant/no-multi-tenancy (ADR-0005), and every other ADR are
+  untouched — this is a revision to exactly one Session 1 business
+  assumption (the demo-hosting decision) and its downstream Success
+  Metric #5 (`00-project-brief.md`), stated explicitly here rather than
+  silently applied, matching the same discipline Session 18 used revising
+  Success Metric #1's wording.
+- **Effect on the MVP boundary checklist.** `01-scope-and-non-goals.md`'s
+  ninth checklist item is revised (not silently marked done) to reflect
+  this decision — see that document directly. **This does not, by
+  itself, mean v1.0.0 can be tagged** — see `12-session-handoff.md`'s
+  Session 24 account for the full assessment against all four conditions
+  in that document's own "Definition of v1 complete."
+
+## B-07/B-08 resolved by decision, not deferred again (Session 24, 2026-08-18)
+
+- **Why these were revisited at all.** Both were filed at Session 22 as
+  genuine open design questions specifically because a *live public*
+  demo instance creates real stakes: richer content matters when a real
+  stranger is looking (`B-07`), and a per-visitor scoped identity matters
+  because a fixed credential facing the real internet is a real abuse
+  vector, T-19 (`B-08`). The decision immediately above removes the "real
+  stranger, real internet" premise both of those judgement calls were
+  weighing risk/effort against. Re-examining them under the new premise
+  is a direct consequence of that decision, not scope creep.
+- **B-07 (richer synthetic demo content): resolved by decision, not
+  built out.** The minimal baseline `demo:reset` already produces (five
+  ABAC policies + the reference connector) is decided as sufficient for
+  this project's actual remaining purpose — proving the deployment and
+  safety mechanics work, which does not require a rich dataset to
+  browse. Building a genuinely compelling sample dataset is downgraded
+  from "needed before go-live" (there is no go-live) to ordinary,
+  non-blocking backlog polish. See `11-backlog.md`'s "Closed" section.
+- **B-08 (per-visitor demo identity): closed, actually built.**
+  `App\Console\Commands\ResetDemoInstanceCommand` now truncates `users`
+  (previously deliberately left untouched — see Session 22's entry) and
+  re-creates exactly one fixed, documented demo-viewer account
+  (`config('demo.viewer_email')`/`'viewer_password'`, both configurable
+  via `.env.example`'s `DEMO_VIEWER_EMAIL`/`DEMO_VIEWER_PASSWORD`, real
+  defaults provided) every time it runs. `users` had to be added to the
+  command's existing single-statement `TRUNCATE` list alongside every
+  other truncated table, not run separately — `audit_log_entries.
+  actor_user_id` and `dsar_requests.identity_verified_by`/
+  `erasure_approved_by` both carry live foreign keys into `users`, and
+  Postgres refuses to truncate a referenced table unless every
+  referencing table is truncated in the same statement (or `CASCADE` is
+  used) — checked directly against the migrations before writing the
+  change, not discovered by a failing `TRUNCATE`.
+  - **Why a single fixed credential is an acceptable simplification of
+    the original per-visitor-scoped-identity goal, specifically here:**
+    Demo Instance Data Safety control 2 and T-19 exist to prevent a
+    shared credential from being discovered and abused by a stranger on
+    the public internet. With no live public instance (this session's
+    other decision), that specific risk cannot occur — there is no
+    public internet this instance is reachable from. This is recorded as
+    a conditional simplification, not a permanent design change: if this
+    project is ever actually deployed to real public infrastructure, the
+    original per-visitor-scoped-identity design becomes the right answer
+    again and this decision must be revisited first, not carried forward
+    unexamined. `config/demo.php`'s own comment and `06-security-threat-
+    model.md`'s T-19 row both say this explicitly, so a future session
+    trips over the caveat rather than missing it.
+  - **`tests/Feature/ResetDemoInstanceCommandTest.php` updated**
+    accordingly: the old assertion that a pre-existing user survives a
+    reset ("users are deliberately untouched") is now the opposite —
+    a pre-existing user (including a stale demo-viewer row with the
+    wrong role/password, simulating a leftover from a differently-shaped
+    prior reset) does not survive, and exactly one correctly-configured
+    demo-viewer account exists afterward, every time.
+
+## Deployment Session B/C locally verified against placeholder infrastructure values (Session 24, 2026-08-18)
+
+- **What this proves, and how it relates to Session 23.** Session 23
+  built and verified `B-06`'s production image against real HTTP,
+  entirely over plain `:80`, explicitly stopping short of TLS or a real
+  domain because neither existed. This session adds exactly those two
+  things — a placeholder domain and TLS — and re-runs the same standard
+  of proof (build, migrate, seed, real login, real authenticated API
+  call) against them, plus exercises every Demo Instance Data Safety
+  control the go/no-go checklist calls for. This is Sessions B and C of
+  `08-deployment-and-operations.md`'s original three-session plan,
+  collapsed into one session and re-scoped from "against real
+  infrastructure" to "against placeholder infrastructure," per this
+  session's revised decision above.
+- **`docker/Caddyfile`**: now serves `demo.privacy-forge.example` (an
+  RFC 2606-reserved, deliberately fake domain — guaranteed to never
+  resolve to a real host) with `tls internal`, Caddy's own offline
+  local-CA issuance mechanism, substituting for real ACME/Let's Encrypt
+  issuance (which needs a real, publicly-resolvable domain and a real
+  HTTP-01/DNS-01 challenge — neither exists here). Swapping the site
+  address for a real domain and deleting the `tls internal` line is the
+  entire diff needed to run this exact config against real
+  infrastructure — Caddy's automatic-HTTPS machinery takes over
+  immediately, with no other structural change. A second, plain-HTTP
+  `:80` block is kept alongside it, unrelated to the TLS site: Caddy's
+  automatic-HTTPS redirect is host-matched, so the existing internal
+  service-to-service traffic (`REFERENCE_CONNECTOR_BASE_URL=http://web`,
+  the reference connector's own webhook callback loop, unchanged since
+  Session 23) still reaches this catch-all rather than being redirected
+  into a TLS handshake it has no reason to need.
+- **`docker-compose.prod.yml`**: `web` now also publishes `8443:443`
+  (host-side only — purely a local artifact so this doesn't need a
+  privileged host port or collide with anything else already on 443;
+  a real deployment would just use 443 directly) and a `caddy-data`
+  named volume, so the internal CA and issued certificate survive a
+  container restart instead of being re-minted (and re-trusted by
+  nothing) every time. `app`/`worker`'s `APP_URL` now reads
+  `https://demo.privacy-forge.example`, matching what a real
+  deployment's own `.env` would actually contain.
+- **A real bug found while proving this, not assumed away:**
+  `opcache.validate_timestamps=0` (deliberately set for this production
+  image, per its own Dockerfile comment — "correct for an immutable
+  production image") means overwriting `bootstrap/cache/config.php` on
+  disk (e.g. re-running `php artisan config:cache` with a different
+  environment against an already-running container) does **not**
+  actually change what already-running PHP-FPM workers observe — they
+  keep executing their existing compiled OPcache copy of the old file
+  regardless of the new contents on disk. Concretely: setting
+  `DEMO_MODE=true` via a one-off `docker compose exec -e DEMO_MODE=true
+  ... config:cache` looked like it worked (`demo:reset` ran
+  successfully in that same exec session, and `tinker` in a fresh CLI
+  process confirmed `config('demo.enabled')` was `true`), but the actual
+  HTTP-facing `demoMode` Inertia prop still read `false` — because the
+  live HTTP path runs through PHP-FPM's own long-lived worker
+  processes, which had already compiled the *previous* `config.php` into
+  OPcache before the on-disk file changed, and `validate_timestamps=0`
+  means they never re-check. **The correct fix — matching how a real
+  operator would actually do this — is to set `DEMO_MODE=true` as a real
+  container environment variable and recreate the container**, letting
+  `docker/entrypoint.prod.sh`'s own `config:cache` run fresh against the
+  right environment from process start, not to patch a running
+  container's cache file in place. Verified by doing exactly that
+  (`docker compose ... up -d --force-recreate app worker` with
+  `DEMO_MODE=true` set as a real service environment variable) and
+  re-checking the HTTP-facing prop, which then correctly read `true`.
+  This is a genuine operational lesson about this image, worth recording
+  precisely because it's the kind of thing that would silently confuse a
+  future session (or a real operator) who tries to toggle `DEMO_MODE` on
+  a live container without a restart and concludes the flag "doesn't
+  work" — it does; it just needs a fresh process, by design, the same
+  design intent `Dockerfile.prod`'s own comment already states for any
+  config change under `validate_timestamps=0`.
+- **Verified for real, over real HTTPS, with a genuinely validated
+  certificate chain — not `-k`/insecure-skipped:**
+  1. `docker compose -f docker-compose.prod.yml -p privacy-forge-prod up
+     -d --build` — both images build clean; `web` reports healthy.
+  2. Caddy's internal root CA extracted directly from the running
+     container (`/data/caddy/pki/authorities/local/root.crt`) and used
+     as `curl --cacert` — i.e. the same trust decision a real client
+     makes against a real CA, not a shortcut around it.
+  3. `GET /up` over `https://demo.privacy-forge.example:8443` (via
+     `curl --resolve`, since no real DNS exists) → `200`, TLS chain
+     validated against the extracted CA, leaf certificate's SAN
+     confirmed to be exactly `demo.privacy-forge.example`.
+  4. A plain HTTP request with `Host: demo.privacy-forge.example`
+     against the same container's port 80 → real `308 Permanent
+     Redirect` to the HTTPS URL — Caddy's automatic-HTTPS redirect,
+     live and working, the same mechanism that would fire against a
+     real domain.
+  5. Real migrations, real `demo:reset` (ABAC policies + reference
+     connector re-seeded, demo-viewer account created), a real `POST
+     /login` over HTTPS with a genuine session/CSRF cookie flow (GET `/`
+     for the session + `XSRF-TOKEN` cookie, decoded and sent back as
+     `X-XSRF-TOKEN`, matching the same standard Session 23 used for its
+     own plain-HTTP login) using the fixed demo-viewer credentials, then
+     a real authenticated `GET /api/v1/admin/audit-log` → `200`,
+     returning that exact login's own `audit.log.view` audit entry —
+     the complete stack (Caddy TLS termination, PHP-FPM, Postgres,
+     Redis-backed sessions, the ABAC gate) proven end to end over HTTPS,
+     the same rigour Session 22/23 and R-08 established.
+  6. `demo:reset`'s actual reset behaviour re-verified against real data,
+     not just "the command exits 0": a consent purpose created via
+     `tinker` (simulating a visitor's activity) existed before a reset
+     and was confirmed gone after it.
+  7. Connector registration re-confirmed genuinely compiled out on the
+     *running* production image itself (`php artisan route:list` inside
+     the live container), not only reasoned about from source — exactly
+     two connector-related routes exist (the reference connector's own
+     webhook receiver, and the generic connector-callback endpoint), no
+     registration endpoint anywhere.
+- **Go/no-go checklist (`08-deployment-and-operations.md`) exercised
+  against this local, placeholder-backed deployment, item by item:**
+  `DEMO_MODE=true` (real container env, confirmed via the live
+  `demoMode` prop); connector registration compiled out (confirmed
+  above); a real spend cap and infrastructure isolation — explicitly
+  marked **not applicable**, per this session's descoping decision, not
+  silently skipped; `demo:reset` scheduled and proven to actually run
+  and actually reset state (confirmed above; still not run by a real
+  cron scheduler against a long-lived instance, since none exists, only
+  invoked directly — an honest, stated limit); `B-08` resolved (fixed
+  demo-viewer credential); `B-07` resolved by decision (minimal baseline
+  is sufficient).
+- **Not an ADR.** No ADR ever specified TLS or the demo-hosting design;
+  this is `08-deployment-and-operations.md`'s own Session B/C plan being
+  executed, re-scoped by the decision above, not a governance reversal.

@@ -26,6 +26,16 @@
 # infrastructure per Demo Instance Data Safety control 5
 # (06-security-threat-model.md); those are not decided or generated
 # here.
+#
+# Session 24: real cloud provisioning is explicitly out of scope for
+# this portfolio build (docs/project-memory/09-decision-log.md) — this
+# file instead proves the deployment automation end-to-end against
+# placeholder infrastructure values. `APP_URL` below uses the fake
+# `demo.privacy-forge.example` domain docker/Caddyfile serves over a
+# self-signed ("tls internal") certificate; `web`'s 8443 host port is a
+# purely local artifact (reaching :443 without binding a privileged host
+# port / colliding with anything else already on 443), not something a
+# real deployment would need.
 
 services:
   app:
@@ -44,7 +54,7 @@ services:
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
-      - APP_URL=http://localhost:8080
+      - APP_URL=https://demo.privacy-forge.example
       - DB_HOST=postgres
       - REDIS_HOST=redis
       - AWS_ENDPOINT=http://minio:9000
@@ -69,6 +79,15 @@ services:
     image: privacy-forge-web-prod:latest
     ports:
       - "8080:80"
+      - "8443:443"
+    volumes:
+      # Persists Caddy's internal CA (created by `tls internal` in
+      # docker/Caddyfile) and the leaf cert it issues across container
+      # restarts — without this, every restart mints a new CA and
+      # invalidates any client that already trusted the old one. A real
+      # deployment with a real domain would persist the equivalent
+      # (real ACME account state/certs) the same way.
+      - caddy-data:/data
     depends_on:
       - app
     healthcheck:
@@ -141,3 +160,4 @@ services:
 volumes:
   postgres-prod-data:
   minio-prod-data:
+  caddy-data:

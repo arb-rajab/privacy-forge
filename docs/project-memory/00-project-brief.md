@@ -1,9 +1,10 @@
 # Project Brief
 > Purpose: the single source of truth for what this project is and why it exists.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-17 (Session 18 — Success Metric #1 wording revised;
-> see `09-decision-log.md` for the reasoning. Nothing else in this document
-> changed.)
+> Last updated: 2026-08-18 (Session 24 — the demo/hosting decision and
+> Success Metric #5 revised to descope real public infrastructure; see
+> `09-decision-log.md` for the reasoning. Session 18's Success Metric #1
+> revision stands unchanged.)
 > Status: FINALISED — Session 1 (Discovery & Business Framing)
 
 ## One-line description
@@ -67,13 +68,19 @@ Disposal), rather than to volume of screens.
   at a scale where they are also a significant **processor** for others.
   This bounds the RoPA and DSAR-orchestration design to a realistic first
   case.
-- **Demo/hosting decision:** a **public hosted demo instance** will exist.
-  This is a deliberate, higher-effort choice made to maximise reviewer
-  impact, and it creates a hard non-negotiable constraint carried forward
-  into Sessions 4 and 8: the demo instance must run on synthetic seed data
-  only, in isolated infrastructure, with a spend cap and scoped credentials,
-  and must never process a real data subject's actual personal data. This
-  is recorded here so a later session cannot quietly relax it.
+- **Demo/hosting decision (revised Session 24 — see `09-decision-log.md`,
+  not silently relaxed here):** the original decision was that a **public
+  hosted demo instance** will exist, as a deliberate, higher-effort choice
+  to maximise reviewer impact, with a hard non-negotiable constraint:
+  synthetic seed data only, isolated infrastructure, a spend cap, scoped
+  credentials, never real personal data. **Session 24 explicitly descopes
+  the "real, paid-for, publicly exposed infrastructure" half of this** —
+  this is a portfolio piece, not a funded product, and ongoing real cloud
+  spend for a permanently-live public box was never proportionate to that.
+  The synthetic-data-only and never-real-personal-data constraints are
+  unchanged and fully honoured; what's revised is *where* this runs
+  (locally, against placeholder infrastructure values, proving the same
+  automation) rather than *whether* the safety constraints apply.
 
 ## Success metrics
 1. **Revised at Session 18 (2026-08-17, see decision log) — the original
@@ -107,10 +114,23 @@ Disposal), rather than to volume of screens.
 4. Every ABAC authorisation decision in the audit log records the policy ID
    that produced it — verified by a dedicated authorisation test asserting
    every route against every role (0 unverified route/role pairs at v1.0.0).
-5. The public demo instance passes a manual pre-launch check confirming: no
-   real PII present, spend cap configured, credentials scoped, and network
-   isolation from any other system — checked and re-confirmed before every
-   deploy, not just once.
+5. **Revised at Session 24 (2026-08-18, see decision log) — no longer
+   promises a live public URL exists.** This portfolio build explicitly
+   descopes paying for and exposing real public infrastructure (see
+   Session 1's own "Demo/hosting decision," above, and the Session 24
+   decision-log entry that revises it). What this metric now claims,
+   honestly: a fully worked local/simulated deployment, run against
+   placeholder infrastructure values (a fake domain, self-signed TLS
+   standing in for real ACME issuance), passes a manual pre-launch check
+   confirming no real PII is present, `DEMO_MODE=true` genuinely
+   disables/enables the right things, and credentials are scoped — with
+   spend-cap and network-isolation explicitly marked **not applicable**
+   (no real infrastructure exists to cap or isolate), not silently
+   skipped. This proves the deployment automation and every Demo Instance
+   Data Safety control that doesn't require real infrastructure, and
+   would work identically against a real domain and a real host per the
+   same Caddyfile structure — it does not claim, and no longer implies,
+   that a reviewer can visit a real URL.
 
 ## Feasibility notes and key risks
 - **Risk — scope creep toward "full compliance platform."** Mitigated by the

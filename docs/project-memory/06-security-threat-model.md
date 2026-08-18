@@ -76,8 +76,8 @@ STRIDE threats, then abuse cases that cut across boundaries.
 | T-16 | B4 PolicyEvaluator (internal) | Policy definitions edited directly at the database level, bypassing the application (e.g. a compromised DB credential) | Tampering | Low/**Critical** | DB-level `UPDATE` grant on `policy_definitions` restricted to the migration/seeding process, not the application's runtime role; all legitimate policy changes go through the `policy.update` sensitive action (added to the registry this session — Owner-only, audit-logged, itself gated by the same fail-closed evaluator) | `tests/Feature/PolicyDefinitionGrantTest.php` (Session 7, DB-grant assertion) |
 | T-17 | B5 Public demo instance | Real personal data is accidentally entered into the public demo by a visitor or a demo operator | Information Disclosure | Med/**Critical** | See dedicated "Demo Instance Data Safety" section below | Manual pre-launch checklist (NFR-010), every deploy |
 | T-18 | B5 Public demo instance | Demo instance is mistaken for, or connected to, a real production deployment (e.g. a real connector is registered against it) | Tampering | Low/Critical | Demo deployment ships with connector registration disabled entirely; only the reference stub connector is pre-seeded | Deployment config review, Session 8 |
-| T-19 | B5 Public demo instance | A single shared "demo admin" credential is discovered and abused (spam, defacement, cost abuse) | Spoofing | Med/Med | No persistent shared admin credential is exposed publicly — see "Demo Instance Data Safety" | Session 8 deployment review |
-| T-20 | B5 Public demo instance | Cost/resource abuse (e.g. scripted DSAR flood) driving the demo past its spend cap | Denial of Service | Med/Med | Aggressive rate limiting specific to the demo environment, hard infrastructure spend cap, alerting on approach to cap | Session 8 deployment review |
+| T-19 | B5 Public demo instance | A single shared "demo admin" credential is discovered and abused (spam, defacement, cost abuse) | Spoofing | Med/Med (**N/A while not publicly exposed — Session 24**) | A fixed, documented demo-viewer credential exists (`B-08`, Session 24) — normally exactly the wrong answer to this threat, deliberately accepted only because Session 24 also descoped ever exposing this instance to real public traffic; this control reverts to fully required, and needs a real per-visitor design, before any future real public deployment — see "Demo Instance Data Safety" | Session 24 (descoping decision); re-assess before any real deployment |
+| T-20 | B5 Public demo instance | Cost/resource abuse (e.g. scripted DSAR flood) driving the demo past its spend cap | Denial of Service | Med/Med (**N/A — no real infrastructure exists to abuse, Session 24**) | Not applicable under Session 24's descoping decision; would need aggressive demo-specific rate limiting, a hard infrastructure spend cap, and alerting before any real deployment | Re-assess before any real deployment |
 
 ## Abuse cases
 
@@ -180,20 +180,21 @@ metric #5).
    level (T-20), carried forward from Session 1 and finalised operationally
    at Session 8.
 
-**Implementation status (Session 22, 2026-08-18) — the design above is
-unchanged; this records what actually exists in code today, not a
-revision to the controls themselves:**
+**Implementation status (Session 24, 2026-08-18) — controls 1-4 now
+verified working against a real, running local deployment; control 5 is
+explicitly descoped, not silently skipped (see `09-decision-log.md`'s
+Session 24 entry for the full account):**
 
 | Control | Status |
 |---|---|
-| 1. Scheduled reset | **Code exists, not deployed.** `App\Console\Commands\ResetDemoInstanceCommand` (`demo:reset`) truncates every subject/activity table and re-seeds the standard baseline; refuses to run unless `config('demo.enabled')` is true. Scheduled in `routes/console.php` via the configurable `DEMO_RESET_SCHEDULE`. Never run against a real deployment. |
-| 2. No persistent shared admin credential | **Not designed.** Filed as `B-08` — a real open question (how a visitor gets a session without a real login or a long-lived shared credential), not yet attempted. |
-| 3. Connector registration disabled entirely | **Already structurally satisfied**, as a side effect of Session 10's unrelated decision that connector management is CLI-only with exactly one registration command (the reference/stub connector). No code change made or needed. |
-| 4. Visible warning banner | **Built.** `demoMode` is now a globally-shared Inertia prop (`HandleInertiaRequests`); `Welcome.vue` renders the banner when it's true. Not yet seen on a real public deployment, since none exists. |
-| 5. Isolation, spend cap, scoped credentials | **Not started.** Infrastructure-level; blocked on a hosting target, which has never been decided (see `12-session-handoff.md`'s Part B plan). |
+| 1. Scheduled reset | **Verified working, against a real local deployment.** `App\Console\Commands\ResetDemoInstanceCommand` (`demo:reset`), run against `docker-compose.prod.yml`'s production-shape stack with `DEMO_MODE=true`: confirmed to genuinely wipe visitor-entered data (a consent purpose created via tinker was gone after the next reset, not merely "ran successfully") and re-seed the standard baseline. Scheduled in `routes/console.php` via the configurable `DEMO_RESET_SCHEDULE`. Still not run against real *hosted* infrastructure — none exists, per control 5. |
+| 2. No persistent shared admin credential | **Resolved for the descoped case, Session 24 (`B-08`).** A single fixed, documented demo-viewer credential (`config('demo.viewer_email')`/`viewer_password`, defaults in `.env.example`), re-created by every `demo:reset` — verified end-to-end: real `POST /login` over HTTPS with these exact credentials, then a real authenticated `GET /api/v1/admin/audit-log`. This is normally exactly the wrong answer to T-19 for a *live public* instance — a fixed credential is discoverable and abusable. It is acceptable **only** because Session 24 also descoped ever exposing this to real public traffic (`09-decision-log.md`) — T-19's actual risk (a stranger on the internet finding and abusing this) cannot occur against a deployment that isn't publicly reachable. **This must be revisited, and very likely reversed, before any future session ever actually deploys this project to a real public host.** |
+| 3. Connector registration disabled entirely | **Re-confirmed on the running production image, not just reasoned about.** `php artisan route:list` against the actual built `docker-compose.prod.yml` container shows exactly two connector-related routes — the reference connector's own inbound webhook receiver and the generic connector-callback endpoint — and no registration endpoint at all, matching Session 10's CLI-only design. Structurally satisfied, confirmed directly. |
+| 4. Visible warning banner | **Verified over real HTTPS.** The homepage's embedded Inertia page payload, fetched from the actual placeholder-domain deployment (`https://demo.privacy-forge.example`, self-signed TLS, genuinely chain-validated against Caddy's own internal CA), shows `"demoMode":true` with `DEMO_MODE=true` set — `Welcome.vue`'s `v-if="page.props.demoMode"` gate renders from exactly this prop. Not verified via an actual browser screenshot this session (would need Playwright trusting the internal CA, disproportionate for this proof, and consistent with R-08's existing accepted limits on browser-based verification); the underlying prop and gate are proven live, matching `tests/Feature/DemoModeSharedPropTest.php`'s existing coverage of the same mechanism. |
+| 5. Isolation, spend cap, scoped credentials | **Explicitly not applicable, by Session 24's own decision — not silently skipped.** No real infrastructure exists, and per the Session 24 decision (`09-decision-log.md`), none is being provisioned for this portfolio build. There is nothing to isolate and no spend to cap. If this project is ever actually deployed to real public infrastructure in the future, this control reverts to fully required and must be built for real at that time. |
 
-See `09-decision-log.md`'s Session 22 entries for the full reasoning
-behind what was and wasn't built.
+See `09-decision-log.md`'s Session 22 and Session 24 entries for the full
+reasoning behind what was built, what changed, and why.
 
 ## Accepted risks
 

@@ -17,4 +17,19 @@ return [
     // "registration is unconditional, the command decides" shape
     // ExecuteRetentionPoliciesCommand already uses.
     'reset_schedule' => env('DEMO_RESET_SCHEDULE', '0 3 * * *'),
+
+    // B-08 (docs/project-memory/11-backlog.md), resolved Session 24: a
+    // single fixed, documented demo-viewer credential, re-created by
+    // every demo:reset. Deliberately acceptable specifically because
+    // Session 24 also descoped ever exposing this to real public
+    // internet traffic (docs/project-memory/09-decision-log.md) — a
+    // fixed credential is exactly what Demo Instance Data Safety
+    // control 2 exists to avoid *for a live public instance* (T-19,
+    // 06-security-threat-model.md); with no live public instance, that
+    // specific risk does not apply. If this project is ever actually
+    // deployed publicly for real, this decision must be revisited
+    // first — a per-visitor scoped identity is the right design for
+    // that case, not this one.
+    'viewer_email' => env('DEMO_VIEWER_EMAIL', 'demo-viewer@privacy-forge.example'),
+    'viewer_password' => env('DEMO_VIEWER_PASSWORD', 'privacy-forge-demo-viewer'),
 ];

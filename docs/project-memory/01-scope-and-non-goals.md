@@ -73,34 +73,49 @@ root cause Session 12 found.
       (ADR-0005 — no tenant column anywhere in the schema).
 - [x] GDPR/UK-GDPR regulatory frame only. Complete — no CCPA (or any other
       jurisdiction's) rule path exists anywhere in the codebase.
-- [ ] A public demo instance running on synthetic seed data, in isolated
-      infrastructure, with a spend cap. **Still not done, but the seeder
-      half is now closed (R-02, Session 16):** `database/seeders/
-      PolicyDefinitionSeeder.php` + `DatabaseSeeder.php` now seed all five
-      ABAC policies on `php artisan db:seed` — the sentence previously here
-      claiming no seeders directory existed at all is now stale and has
-      been corrected. What remains undone is the demo-instance-specific
-      part: isolated infrastructure, a spend cap, and a scheduled reset —
-      none of that exists, and `docs/project-memory/
-      08-deployment-and-operations.md` is still an entirely unwritten stub
-      (every section header, including "Backup and restore" and "Capacity
-      and cost notes," has no content under it) — despite
-      `03-architecture.md` stating restore drills were "recorded in
-      `08-deployment-and-operations.md` (Session 8)." That specific
-      cross-reference does not hold; flagged here rather than silently left
-      for a future session to discover the same way the Session 8
-      TTL-testing claim was checked and clarified at Session 11.
+- [x] A public demo instance running on synthetic seed data, in isolated
+      infrastructure, with a spend cap. **Revised and closed, Session 24
+      — by explicit descoping, not by quietly redefining the checklist.**
+      `09-decision-log.md`'s Session 24 entry records the decision
+      plainly: this portfolio build descopes actually paying for and
+      exposing real public infrastructure (no funded product exists here
+      to justify ongoing cloud spend), and instead proves the same
+      deployment automation end-to-end against placeholder infrastructure
+      values — a fake domain (`demo.privacy-forge.example`,
+      RFC 2606-reserved), self-signed ("`tls internal`") TLS in place of
+      real ACME issuance, run locally. What this item's original wording
+      actually asked for — synthetic seed data (true: `demo:reset`
+      re-seeds a fixed minimal baseline), a working demo-safety posture
+      (true: all four applicable Demo Instance Data Safety controls
+      verified working against this local deployment,
+      `06-security-threat-model.md`), and infrastructure isolation/spend
+      cap (explicitly marked not-applicable, not silently skipped — there
+      is deliberately no real infrastructure to isolate or cap) — is
+      honestly satisfied under this revised, descoped scope. What is
+      **not** true, stated plainly: there is no live, publicly-reachable
+      URL, and per this decision there is not going to be one from this
+      portfolio build. See `08-deployment-and-operations.md`'s Sessions
+      A/B/C account and `12-session-handoff.md` for the full verification
+      record. (Previously: the seeder half closed at Session 16 via R-02;
+      the image half — `B-06` — closed at Session 23; this entry
+      supersedes the "still not done" wording both of those sessions left
+      here.)
 
 This list is the literal checklist for "MVP complete" — see the Definition
-below. **As of Session 17: 8 of 9 items are genuinely complete; the
-remaining item is the public demo instance itself** (isolated
-infrastructure, spend cap, scheduled reset — the seeder half of this item
-closed at Session 16 via R-02). The "no frontend" root cause Session 12
-found remains closed, and the audit-log anchor (R-04) closed this session.
-The project is closer to MVP-complete than at any prior session, but
-cannot yet be credibly called MVP-complete per
-its own Definition below, specifically condition 1 ("every box...
-checked and demonstrably working end-to-end").**
+below. **As of Session 24: all 9 items are genuinely complete** — the
+"no frontend" root cause Session 12 found remains closed, the audit-log
+anchor (R-04) closed at Session 17, and the public-demo-instance item
+closed this session by the explicit descoping decision above, not by
+quietly relaxing its wording. **This does not by itself mean v1.0.0 can be
+tagged — see the Definition of "v1 complete" below; conditions 2 and 3 are
+independent of this checklist and are not confirmed as of Session 24. See
+`12-session-handoff.md`'s Session 24 account for the full assessment
+against all four conditions, including a newly found gap in condition 3
+(the Gate 9→10 checklist file this document itself cites,
+`04-session-system-and-templates.md`, does not exist anywhere in this
+repository — flagged here rather than silently left for a future session
+to trip over, the same discipline this document already used for the
+Session 8 restore-drill cross-reference above).**
 
 ## Explicit non-goals
 

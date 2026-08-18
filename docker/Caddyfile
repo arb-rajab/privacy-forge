@@ -7,12 +7,34 @@
 # front-controller PHP app needs, so this file stays intentionally
 # minimal rather than reimplementing that by hand.
 #
-# `:80` (no domain, no TLS) matches Session A's exit criterion — real
-# infrastructure reachable only by IP. Session B replaces this with the
-# real domain name, at which point Caddy provisions TLS automatically;
-# see docs/project-memory/08-deployment-and-operations.md.
+# --- Session 24: placeholder domain + local/internal TLS ---
+#
+# `demo.privacy-forge.example` is a deliberately fake domain —
+# `.example` is IANA-reserved for documentation (RFC 2606), guaranteed
+# to never resolve to a real host. Session 24's decision log
+# (docs/project-memory/09-decision-log.md) records why: this portfolio
+# build descopes actually registering a domain and paying for public
+# infrastructure, and proves the deployment automation instead against
+# placeholder values.
+#
+# `tls internal` substitutes for real ACME/Let's Encrypt issuance: it
+# has Caddy mint (and trust) its own local CA and issue this site a
+# certificate from it, entirely offline — no public CA, no HTTP-01/
+# DNS-01 challenge, no real domain required. This is what actually
+# makes it possible to prove "HTTPS terminates correctly at Caddy and
+# proxies to the app" without a real domain to request a real
+# certificate for.
+#
+# The load-bearing point: swapping the site address below for a real,
+# owned, publicly-resolvable domain and deleting the `tls internal`
+# line is the *entire* diff needed to run this exact Caddyfile against
+# real infrastructure — Caddy's default behaviour (automatic HTTPS via
+# Let's Encrypt) takes over immediately, with no other structural
+# change. Nothing here is a toy config that would need to be rewritten
+# later; it is the real config, minus one line, plus a fake domain.
+demo.privacy-forge.example {
+	tls internal
 
-:80 {
 	root * /srv/public
 	encode gzip
 
@@ -25,6 +47,30 @@
 	# (an override matching the wrong container) gives php-fpm a path
 	# that doesn't exist on its side and every request 404s — confirmed by
 	# hitting exactly that failure before adding this override.
+	php_fastcgi app:9000 {
+		root /var/www/html/public
+	}
+
+	file_server
+}
+
+# --- Internal-only plain HTTP, unrelated to the public-facing site above ---
+#
+# Caddy's automatic-HTTPS machinery (including the http->https redirect
+# it sets up for the domain site) is host-matched: it only applies to
+# requests whose Host header is actually "demo.privacy-forge.example".
+# Traffic addressed to this container by its Compose service name
+# ("web") — specifically REFERENCE_CONNECTOR_BASE_URL=http://web, the
+# reference/stub connector's own webhook callback loop, unchanged since
+# Deployment Session A — has Host "web" and falls through to this
+# catch-all instead, served in plain HTTP with no TLS involved. This is
+# also the correct shape for a real deployment: purely internal,
+# never-leaves-the-network service traffic has no reason to pay for TLS
+# termination that only the genuinely public-facing site needs.
+:80 {
+	root * /srv/public
+	encode gzip
+
 	php_fastcgi app:9000 {
 		root /var/www/html/public
 	}
