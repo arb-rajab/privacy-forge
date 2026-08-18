@@ -166,8 +166,11 @@ over-engineered for a scale this product will never see:
 
 - Web and worker containers are stateless and can be horizontally scaled
   behind a load balancer/reverse proxy if an operator genuinely needs it,
-  but the reference deployment (Session 8) ships as a small number of
-  containers — appropriate to the actual buyer (a 2–30 person company).
+  but the reference deployment ships as a small number of containers
+  (`docker-compose.prod.yml`, built at Deployment Session A — not
+  Session 8, which this line previously and incorrectly claimed; see
+  `09-decision-log.md`) — appropriate to the actual buyer (a 2–30 person
+  company).
 - Redis absorbs queue and rate-limiting load; no separate message broker is
   introduced (Kafka/RabbitMQ would be disproportionate here — that
   architectural pattern is deliberately demonstrated elsewhere in the

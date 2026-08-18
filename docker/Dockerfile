@@ -2,9 +2,15 @@
 #
 # This image runs `php artisan serve`, which is appropriate for local
 # development and for the CI environment. The production reference
-# deployment (PHP-FPM + a real web server, built at Session 8) is a
-# separate, hardened image — this Dockerfile is deliberately not that,
-# and should not be mistaken for a production artifact.
+# deployment (PHP-FPM + a real web server) is a separate, hardened image
+# — docker/Dockerfile.prod (`app`/`web` targets, paired with
+# docker-compose.prod.yml) — built for real at Deployment Session A
+# (docs/project-memory/08-deployment-and-operations.md), not at Session
+# 8 as this comment previously and incorrectly claimed. See
+# docs/project-memory/09-decision-log.md's Session 22/Deployment
+# Session A entries for the full account of that drift. This Dockerfile
+# is deliberately not that, and should not be mistaken for a production
+# artifact.
 #
 # Multi-stage, two usable final targets (R-07,
 # docs/project-memory/10-risk-register.md, Session 18):

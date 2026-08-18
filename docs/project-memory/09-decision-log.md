@@ -605,3 +605,123 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   this is new, narrow, within-scope implementation work (a documented
   control finally gaining code), logged here per the same judgement call
   Session 11/12 used for their own non-ADR decisions.
+
+## B-06 re-verified from raw git history before being built (Session 23, 2026-08-18)
+
+- **Why re-verify a finding Session 22 already filed.** Before starting
+  Deployment Session A, this session was asked to check whether B-06 was
+  merely an unfulfilled *aspirational* comment or whether some prior
+  session's own handoff/summary had actually *claimed* the production
+  image existed — the latter would be an ADR-0008-shaped problem
+  (narration and reality diverging) requiring the same forensic rigor,
+  not routine backlog work. This was checked directly against git
+  history, not re-derived from Session 22's own account.
+- **What the history actually shows.** The "built at Session 8" comment
+  was introduced by commit `d2611fa` ("chore(S5): environment, CI
+  baseline, and running application skeleton") — **Session 5**, three
+  sessions *before* Session 8 ever happened. At the time it was written,
+  it was a forward-looking plan ("this will be built at Session 8"), not
+  a claim about the present. Session 8 itself (`ae42449`) shipped
+  connector dispatch/callback/export-bundle/deletion-certificate work
+  (US-007/008/009) — its own handoff document, read in full as part of
+  this check, makes zero mention of a production image, PHP-FPM, or a
+  web server. No commit ever touches `docker/Dockerfile` between Session
+  5 and Session 22 in a way that builds this. Session 13's decision log
+  entry, which Session 22 cited as a second source "confirming" the
+  claim, does not independently confirm anything — it merely repeats the
+  same unverified assumption from the Session 5 comment without checking
+  `docker/` itself.
+- **Conclusion: this is not the same shape as ADR-0008.** ADR-0008 was a
+  real, executed divergence — `composer.json` was actually bumped in the
+  same commit whose own prose said the opposite, and every session for
+  14 sessions inherited that false-negative belief unchecked. B-06 has no
+  such artifact-vs-narration contradiction: no session's own handoff ever
+  asserts the production image was built. It is a stale, never-corrected
+  *forward-looking* placeholder from Session 5, naming a target session
+  that came and went doing unrelated work, silently repeated at Session
+  13 without anyone re-checking `docker/`, and finally caught at Session
+  22 when a session that actually needed the artifact went looking for
+  it. Milder than ADR-0008's shape, but the same root lesson: a claim
+  about repository state is not verified state. No new ADR opened; the
+  existing B-06 backlog item and Session 22's decision-log entry already
+  scoped this correctly as backlog/build work, not a governance reversal.
+
+## Deployment Session A: B-06 built for real, production stack verified locally (Session 23, 2026-08-18)
+
+- **What was built.** `docker/Dockerfile.prod` (two targets: `app` —
+  PHP-FPM 8.3, OPcache enabled with production settings, no Node/npm/
+  Playwright, no sockets/pcntl since nothing here runs tests/Browser/;
+  `web` — Caddy, serves `public/build`'s compiled static assets directly
+  and reverse-proxies dynamic requests to `app` over FastCGI), plus
+  `docker/Caddyfile` and `docker-compose.prod.yml`.
+- **Two real bugs found and fixed while getting it running, not assumed
+  away:**
+  1. `frontend-assets`'s original `node:20-alpine` base hit npm's own
+     documented optional-dependency bug (npm/cli#4828) — `package-lock.json`
+     resolved the glibc `@rollup/rollup-linux-x64-gnu` binary (matching
+     `docker/Dockerfile.frontend` and CI's `actions/setup-node`, both
+     glibc), and Alpine's musl libc has no matching binary. Fixed by
+     switching to `node:20-slim`, matching every other Node environment
+     already proven to work in this repository.
+  2. Caddy's `php_fastcgi app:9000` initially 404'd on every request.
+     Root cause: Caddy's own `root` directive governs *its own*
+     filesystem (for `file_server`), but the `SCRIPT_FILENAME` FastCGI
+     path it sends to the remote `app` container is resolved against
+     *that* container's filesystem — `/var/www/html/public`, not Caddy's
+     `/srv/public`. Fixed with an explicit `php_fastcgi { root
+     /var/www/html/public }` override; confirmed by hitting the 404
+     first, not assumed as a known gotcha and pre-emptively avoided.
+  3. `route:cache` was deliberately never attempted in the entrypoint:
+     `routes/web.php`'s Inertia page routes are closure-based, and
+     Laravel's route cache cannot serialize closures. Checked
+     `routes/web.php` before writing `docker/entrypoint.prod.sh`, not
+     discovered by a crash-looping container. `config:cache` and
+     `view:cache` run at container start (not build time — config:cache
+     bakes in whatever env is present, and this image is generic across
+     deployments with different env per deployment).
+- **Verified for real, over real HTTP, against the built images — not
+  assumed:**
+  1. `docker compose -f docker-compose.prod.yml -p privacy-forge-prod up
+     -d --build` — both images build clean.
+  2. `GET /up` → `200`, Laravel's real health page, through Caddy → PHP-
+     FPM, no dev server anywhere in the path.
+  3. `GET /` → `200` (the actual Inertia homepage); a compiled static
+     asset (`/build/assets/app-*.css`) → `200` via Caddy's `file_server`.
+  4. `docker run --entrypoint sh privacy-forge-app-prod:latest -c "which
+     node npm"` → nothing found; `php -m` → no `sockets`/`pcntl`/`xdebug`
+     — confirmed the image is actually lean, not just assumed from the
+     Dockerfile's own intent.
+  5. Real migrations (`php artisan migrate --force`) against this stack's
+     own fresh Postgres container, real seeding
+     (`PolicyDefinitionSeeder`), a real Owner created
+     (`privacy-forge:create-owner`), a real `POST /login` with a genuine
+     CSRF/session cookie flow (not `actingAs()`), then a real
+     authenticated `GET /api/v1/admin/audit-log` → `200`, returning that
+     exact login's own `audit.log.view` audit entry — proving the full
+     stack (Caddy, PHP-FPM, Postgres, Redis-backed sessions, the ABAC
+     gate) works end to end, the same "prove it over real HTTP" standard
+     Session 22 and R-08 established, not just a health-check pass.
+- **`docker/Dockerfile`'s and `docker-compose.yml`'s stale "built at
+  Session 8" header comments corrected** in the same session that
+  finally builds the real thing, per Session 22's own instruction not to
+  edit them separately from the fix.
+- **What this explicitly does not prove, stated plainly.** Every check
+  above ran against `localhost`/local Docker networking. No real cloud
+  account, VPS, or hosting credentials exist in this environment (no
+  `doctl`/`hcloud`/`flyctl`/`aws`/`az`/`gcloud`/`terraform` CLI is even
+  installed) — actual infrastructure provisioning, a real public IP, DNS,
+  TLS, and a real spend cap are **not** part of what was verified here
+  and were not attempted, matching the ground rule against real cloud
+  spend or public exposure without explicit confirmation first. This is
+  an honest partial completion of Deployment Session A's own exit
+  criterion ("the app responds to `GET /up` over the real
+  infrastructure's public IP") — the image half is done and proven; the
+  infrastructure half is not, and is handed off explicitly rather than
+  silently marked done.
+- **B-07/B-08 not touched, correctly per the plan.** Session A's own
+  go/no-go checklist only requires them resolved before real go-live
+  (Sessions B/C respectively) — they do not block this session's own
+  exit criterion and were not designed here.
+- **Not an ADR.** No ADR ever specified a production image design; this
+  is `B-06` finally being built, per Session 22's own filing of it as
+  backlog/build work, not a governance decision.

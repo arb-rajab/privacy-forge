@@ -1,8 +1,10 @@
 # Deployment and Operations
 > Purpose: how this runs, and how someone else keeps it running
 > Project: privacy-forge (public)
-> Last updated: 2026-08-18 (Session 22 — first real content; this file was
-> an empty template through Session 21)
+> Last updated: 2026-08-18 (Session 23 — Deployment Session A executed:
+> B-06's production image built and verified locally; Session 22 first
+> gave this file real content, replacing the empty template through
+> Session 21)
 
 **Scope note.** This project has two genuinely different "deployments":
 (1) a self-hoster's own instance, which is fully covered by the README
@@ -20,7 +22,7 @@ actually about. Nothing below applies to a self-hoster's install.
 |---|---|---|
 | Local dev | `docker-compose.yml` (`app`/`worker`/`postgres`/`redis`/`minio`/`frontend`) | Exists, used every session |
 | CI | `.github/workflows/ci.yml` — Pint, Larastan, Pest, ESLint, CodeQL, `osv-scanner`, OpenAPI validation | Exists |
-| Public demo | The subject of this document | **Does not exist yet.** No hosting target decided, no infrastructure provisioned, no DNS, no TLS. |
+| Public demo | The subject of this document | **Still does not exist as a real deployment.** Session 23 built and locally verified the real production-shape image (`docker-compose.prod.yml`) — see "Build and release pipeline" below — but no hosting target is provisioned, no DNS, no TLS, and nothing runs anywhere but this local machine. |
 
 There is no staging environment and none is planned — a single-org,
 self-hosted product has no shared production environment of its own to
@@ -35,27 +37,53 @@ convenience, not a staging tier for anything.
   (ADR-0008's safeguard), and OpenAPI spec validation. This is the
   release gate for the *codebase*; it says nothing about deployment,
   since nothing is deployed anywhere today.
-- **`docker/Dockerfile`'s `runtime` target is a development image**,
-  despite the file's own header comment claiming otherwise (`php artisan
-  serve`, Laravel's own docs call this "not intended for production" —
-  single-threaded, no process manager, no static-asset serving strategy
-  beyond Vite's dev server). **No production-grade image (PHP-FPM + a
-  real web server) exists anywhere in this repository** — this was
-  found this session to be a real documentation/reality drift (a
-  comment claiming "built at Session 8" for something that was never
-  built; see `09-decision-log.md`'s Session 22 forensic-finding entry
-  and `11-backlog.md`'s `B-06`). **This is a hard blocker for the demo
-  going live on a real public URL** and must be built before any
-  hosting decision is executed, not assumed to already exist.
+- **`docker/Dockerfile`'s `runtime` target is a development image**
+  (`php artisan serve`, Laravel's own docs call this "not intended for
+  production") — this remains true and unchanged; that target was never
+  meant to become the production image.
+- **A real production-grade image now exists: `docker/Dockerfile.prod`**
+  (built Session 23, closing `B-06`). Two targets, both built by
+  `docker-compose.prod.yml`:
+  - `app` — PHP-FPM 8.3 with OPcache enabled (production settings:
+    `validate_timestamps=0`), application code, and compiled frontend
+    assets baked in at build time (a `frontend-assets` stage runs `npm
+    run build`). No Node/npm/Playwright, no `sockets`/`pcntl` (those are
+    test-only, per decision log Session 13 — this image never runs
+    `tests/Browser/`).
+  - `web` — Caddy, serving `public/build`'s compiled static assets
+    directly and reverse-proxying dynamic requests to `app` over
+    FastCGI (`php_fastcgi`).
+  - Verified locally, over real HTTP, against real Postgres/Redis/MinIO
+    containers: build → migrate → seed → create a real Owner → real
+    `POST /login` → real authenticated `GET /api/v1/admin/audit-log` →
+    `200`. See `09-decision-log.md`'s Session 23 entry for the full
+    account, including two real bugs found and fixed while building it
+    (an npm/rollup musl issue on the original Alpine-based Node stage;
+    a Caddy `php_fastcgi` root-path mismatch between the two
+    containers' filesystems).
+  - **Not yet proven: this image running anywhere but `localhost`.** No
+    cloud account, VPS, or provisioning CLI (`doctl`/`hcloud`/`flyctl`/
+    `aws`/`az`/`gcloud`/`terraform`) exists in this environment — real
+    infrastructure was neither provisioned nor attempted this session.
+  - `docker/Dockerfile`'s and `docker-compose.yml`'s header comments,
+    which previously and incorrectly referenced a production image
+    "built at Session 8," are corrected to point here.
 - No image registry is configured; no CD pipeline exists; nothing
-  publishes a build artifact anywhere today.
+  publishes a build artifact to a registry anywhere today (the two
+  images above are built locally, not pushed anywhere).
 
 ## Deployment procedure
 
-**Status: does not exist. This section is a plan, not a runbook** — see
-"The actual deployment session(s)" below for what needs to happen before
-this section can honestly describe a real procedure instead of a plan
-for one.
+**Status: still a plan, not a runbook, for real infrastructure** — but
+the local half is now real and repeatable: `docker compose -f
+docker-compose.prod.yml build && docker compose -f
+docker-compose.prod.yml up -d`, then `docker compose -f
+docker-compose.prod.yml exec app php artisan migrate --force` (see
+`09-decision-log.md`'s Session 23 entry for the exact sequence this was
+verified against). What's still missing before this is a real procedure
+rather than a local rehearsal: an actual host to run it on, DNS, TLS,
+and a real APP_KEY/DB credentials/secrets set generated for that host
+specifically — see "The actual deployment session(s)" below.
 
 ## Migration and rollback procedure
 
@@ -188,10 +216,11 @@ container platform (Fly.io, Railway, Render, ECS, etc.). Reasoning:
 
 ### What must exist before a real public URL can go live (the actual go/no-go checklist)
 
-1. **A real production application image (`B-06`).** PHP-FPM + a real
-   web server (nginx or Caddy — Caddy's automatic TLS is a genuine point
-   in its favour if the chosen host doesn't already terminate TLS for
-   you), replacing `php artisan serve`. Does not exist; must be built.
+1. **A real production application image (`B-06`).** ~~Does not exist;
+   must be built.~~ **Done, Session 23.** `docker/Dockerfile.prod` +
+   `docker-compose.prod.yml` — PHP-FPM + Caddy (chosen for exactly the
+   automatic-TLS reason named here), replacing `php artisan serve`.
+   Verified locally over real HTTP; not yet run on real infrastructure.
 2. **The hosting target actually decided and provisioned.** Real
    infrastructure, isolated from anything else (Demo Instance Data
    Safety control 5) — not attempted this session, per Part B's explicit
@@ -222,12 +251,20 @@ container platform (Fly.io, Railway, Render, ECS, etc.). Reasoning:
 has a different failure mode if rushed, and each produces a real,
 checkable artifact the next can build on.
 
-1. **Session A — Production image + infra provisioning.** Build the
-   real PHP-FPM/web-server image (`B-06`); decide and provision the
-   hosting target (confirming or overriding the recommendation above);
-   get a real `docker compose up -d` running on real infrastructure,
-   reachable only by IP (no DNS/TLS yet). Exit criterion: the app
-   responds to `GET /up` over the real infrastructure's public IP.
+1. **Session A — Production image + infra provisioning.** **Partially
+   done (Session 23).** The real PHP-FPM/web-server image (`B-06`) is
+   built and verified locally over real HTTP (build, migrate, seed, real
+   login, real authenticated API call — see `09-decision-log.md`).
+   **Not done: deciding-for-real and provisioning the hosting target.**
+   This environment has no cloud account, VPS, or provisioning CLI
+   (`doctl`/`hcloud`/`flyctl`/`aws`/`az`/`gcloud`/`terraform` all
+   checked, none installed) — provisioning real infrastructure needs
+   either a human with real cloud credentials to do it directly, or a
+   future session run somewhere those credentials/tools are available.
+   This was flagged rather than silently skipped or faked with a
+   substitute. **Exit criterion status: the app responds to `GET /up`
+   locally, over the production-shape stack — not yet over any real
+   infrastructure's public IP**, since none has been provisioned.
 2. **Session B — Demo-safety verification + DNS/TLS.** Set
    `DEMO_MODE=true` for real and confirm the banner/reset actually work
    against the real deployed instance (not just dev/test, as this

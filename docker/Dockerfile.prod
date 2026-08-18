@@ -1,0 +1,96 @@
+# privacy-forge — production application image (B-06)
+#
+# This is the real production-shape image docker/Dockerfile's own header
+# comment referenced ("built at Session 8") but never existed — see
+# docs/project-memory/09-decision-log.md's Session 22 forensic finding
+# and this session's follow-up entry. PHP-FPM, no built-in HTTP server,
+# no `php artisan serve`; paired with a real web server (Caddy) that
+# terminates HTTP(S) and proxies to this image over FastCGI.
+#
+# Two independently-buildable final stages, matching the two-container
+# split docs/project-memory/08-deployment-and-operations.md's deployment
+# plan calls for:
+#   - `app` — PHP-FPM, application code + compiled frontend assets, no
+#     Node.js/npm/Playwright and no dev-only PHP extensions
+#     (sockets/pcntl are test-only, per decision log Session 13 — this
+#     image never runs tests/Browser/, so they're not installed here).
+#   - `web` — Caddy, serves public/build's static output directly and
+#     reverse-proxies dynamic requests to `app` via php_fastcgi.
+# `docker compose -f docker-compose.prod.yml build` builds both targets
+# from this one file.
+
+# ---------------------------------------------------------------------------
+# node:20-slim (glibc), not -alpine: package-lock.json's resolved
+# optional rollup binary is the glibc build (matching
+# docker/Dockerfile.frontend and CI's actions/setup-node, both glibc) —
+# `npm ci` against an Alpine/musl base hits npm's own optional-deps bug
+# (https://github.com/npm/cli/issues/4828), confirmed by actually hitting
+# it against node:20-alpine before switching this.
+FROM node:20-slim AS frontend-assets
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+FROM php:8.3-fpm AS php-deps
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        unzip \
+        libpq-dev \
+        libzip-dev \
+        ca-certificates \
+    && docker-php-ext-install pdo pdo_pgsql zip opcache \
+    && rm -rf /var/lib/apt/lists/*
+
+# php.net's own documented "recommended production settings."
+# validate_timestamps=0 means a code change requires a container
+# restart to be picked up — correct for an immutable production image
+# built fresh per release, wrong for a live-edited dev tree (which is
+# exactly why docker/Dockerfile's dev image does not set this).
+RUN { \
+        echo 'opcache.enable=1'; \
+        echo 'opcache.memory_consumption=128'; \
+        echo 'opcache.max_accelerated_files=10000'; \
+        echo 'opcache.validate_timestamps=0'; \
+    } > /usr/local/etc/php/conf.d/opcache-recommended.ini
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+COPY composer.json composer.lock* ./
+RUN composer install --no-interaction --no-dev --no-scripts --no-progress --optimize-autoloader
+
+# ---------------------------------------------------------------------------
+FROM php-deps AS app
+
+COPY . .
+COPY --from=frontend-assets /app/public/build ./public/build
+
+# Re-run install (no-scripts was only for the dependency-layer cache
+# above) so post-install package discovery runs against the full app
+# tree, matching docker/Dockerfile's own runtime target's two-phase
+# install pattern.
+RUN composer install --no-interaction --no-dev --no-progress --optimize-autoloader \
+    && chown -R www-data:www-data storage bootstrap/cache
+
+COPY docker/entrypoint.prod.sh /usr/local/bin/entrypoint.prod.sh
+RUN chmod +x /usr/local/bin/entrypoint.prod.sh
+
+ENTRYPOINT ["entrypoint.prod.sh"]
+CMD ["php-fpm"]
+
+EXPOSE 9000
+
+# ---------------------------------------------------------------------------
+FROM caddy:2-alpine AS web
+
+COPY --from=frontend-assets /app/public /srv/public
+COPY docker/Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80

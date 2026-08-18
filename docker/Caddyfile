@@ -1,0 +1,33 @@
+# privacy-forge — production web tier (Caddy)
+#
+# Serves public/build's compiled static assets directly, and proxies
+# dynamic requests to the `app` service (PHP-FPM) over FastCGI.
+# `php_fastcgi` is Caddy's high-level directive for exactly this
+# pattern — it sets up the try_files/index/split-path rules a
+# front-controller PHP app needs, so this file stays intentionally
+# minimal rather than reimplementing that by hand.
+#
+# `:80` (no domain, no TLS) matches Session A's exit criterion — real
+# infrastructure reachable only by IP. Session B replaces this with the
+# real domain name, at which point Caddy provisions TLS automatically;
+# see docs/project-memory/08-deployment-and-operations.md.
+
+:80 {
+	root * /srv/public
+	encode gzip
+
+	# `root` above is Caddy's own filesystem (this container's copy of
+	# public/build's static output, for file_server below). The `app`
+	# service is PHP-FPM in a *separate* container, whose real filesystem
+	# root is /var/www/html/public — php_fastcgi's own `root` subdirective
+	# sets the SCRIPT_FILENAME sent over FastCGI, which php-fpm resolves
+	# against its own filesystem, not this one. Using /srv/public there
+	# (an override matching the wrong container) gives php-fpm a path
+	# that doesn't exist on its side and every request 404s — confirmed by
+	# hitting exactly that failure before adding this override.
+	php_fastcgi app:9000 {
+		root /var/www/html/public
+	}
+
+	file_server
+}

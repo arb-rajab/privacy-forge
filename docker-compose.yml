@@ -1,8 +1,11 @@
 # privacy-forge — local development stack
 #
 # This is a development reference stack, not the production deployment
-# (that's a Session 8 deliverable). It exists to satisfy Session 5's exit
-# criterion: a clean clone reaches a running application via one
+# — see docker-compose.prod.yml (built at Deployment Session A; this
+# repo's docker/Dockerfile header comment previously and incorrectly
+# claimed this already existed "at Session 8", see
+# docs/project-memory/09-decision-log.md). It exists to satisfy Session
+# 5's exit criterion: a clean clone reaches a running application via one
 # documented command (`docker compose up`, after the setup steps in
 # CONTRIBUTING.md).
 #

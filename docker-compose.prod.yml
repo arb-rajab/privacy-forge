@@ -1,0 +1,143 @@
+# privacy-forge — production-shape stack (B-06 / Deployment Session A)
+#
+# This is what a single VPS running `docker compose up -d` (the
+# recommendation in docs/project-memory/08-deployment-and-operations.md)
+# actually runs. It reuses docker-compose.yml's dependency images
+# (postgres/redis/minio) unmodified — those were never the dev-only
+# part of that file, only `app`'s `php artisan serve` was — but builds
+# `app`/`web` from docker/Dockerfile.prod instead.
+#
+# Local verification only, so far: run with a distinct project name to
+# avoid colliding with docker-compose.yml's dev stack if both are up at
+# once, e.g. `docker compose -f docker-compose.prod.yml -p privacy-forge-prod up -d --build`.
+# Host ports below are deliberately different from docker-compose.yml's
+# (8080 not 8000, 5433 not 5432, 6380 not 6379, 9002/9003 not 9000/9001)
+# for the same reason. A real deployment on its own VPS would not need
+# this distinction, or would terminate these dependencies as managed
+# services instead of containers — genuinely undecided until the actual
+# hosting target is provisioned (see the deployment doc's go/no-go
+# checklist, item 2 — not attempted this session; no cloud account or
+# credentials are available in this environment).
+#
+# Secrets below (POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, APP_KEY) are
+# dev-only placeholder values for local verification, the same as
+# docker-compose.yml's — never real secrets, never committed real
+# values. A real deployment generates its own, scoped to isolated
+# infrastructure per Demo Instance Data Safety control 5
+# (06-security-threat-model.md); those are not decided or generated
+# here.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: app
+    image: privacy-forge-app-prod:latest
+    # Reuses the repo-root .env for APP_KEY and every other value this
+    # session isn't overriding (this project's real secrets are already
+    # externalised to env vars, per 06-security-threat-model.md's
+    # "Secrets management" — a real deployment supplies its own .env,
+    # never this dev-generated one). The explicit overrides below win
+    # over anything env_file sets for the same key.
+    env_file: .env
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_URL=http://localhost:8080
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+      # Production topology has no `app:8000` HTTP listener (app is
+      # FastCGI-only now) — the reference/stub connector's own webhook
+      # endpoint must be reached through the web tier instead, unlike
+      # docker-compose.yml's dev default (http://app:8000).
+      - REFERENCE_CONNECTOR_BASE_URL=http://web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: web
+    image: privacy-forge-web-prod:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: privacy-forge-app-prod:latest
+    command: ["php", "artisan", "queue:work", "--tries=3"]
+    env_file: .env
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+      - REFERENCE_CONNECTOR_BASE_URL=http://web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=privacy_forge
+      - POSTGRES_USER=privacy_forge
+      - POSTGRES_PASSWORD=privacy_forge_dev_only
+    volumes:
+      - postgres-prod-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U privacy_forge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=privacy_forge_dev
+      - MINIO_ROOT_PASSWORD=privacy_forge_dev_only
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    volumes:
+      - minio-prod-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-prod-data:
+  minio-prod-data:
