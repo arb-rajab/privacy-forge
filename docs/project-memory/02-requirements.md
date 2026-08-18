@@ -286,8 +286,10 @@ authorisation logic is auditable and independently testable.
 - Public demo instance must never contain real personal data at any point
   (FR-018, NFR-010) — this constrains seed-data generation design (Session 3)
   and the deployment checklist (Session 8) simultaneously.
-- Stack is fixed: Laravel 11, Vue 3/Inertia, PostgreSQL, Redis, S3-compatible
-  storage — per the frozen ledger allocation (Session 0).
+- Stack is fixed: Laravel 12 (`^12.61.1` — corrected from the Session 0
+  ledger's stale "Laravel 11" by ADR-0008, Session 20; see
+  `09-decision-log.md`), Vue 3/Inertia, PostgreSQL, Redis, S3-compatible
+  storage.
 
 ## GDPR Article Requirements Traceability Matrix
 

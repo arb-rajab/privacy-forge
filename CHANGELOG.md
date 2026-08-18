@@ -6,6 +6,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documented (Session 20, 2026-08-18)
+- **Retroactively decided and documented the Laravel version this
+  repository actually runs on.** Forensic investigation traced an
+  undocumented "Laravel 11 → 12" drift to commit `97868f1` (Session 5's
+  first correction commit): its `composer.json` diff applied a
+  CVE-driven `laravel/framework` bump that the *same commit's* own
+  `CHANGELOG.md`/handoff entries explicitly said was declined and not
+  applied — a self-contradiction between narrated decision and actual
+  diff, never caught by any of the 13 sessions since. `composer.lock`
+  confirms the codebase has run exclusively on Laravel 12.x (currently
+  `v12.66.0`) since Session 6a's first real build — every feature, every
+  test, for 14 sessions. See **ADR-0008**
+  (`docs/adr/ADR-0008-laravel-12-retroactive-adoption.md`) for the full
+  account and the decision to keep Laravel 12 (reverting now would mean
+  running code that has never once executed on Laravel 11, for no
+  functional benefit). A new CI job (`dependency-governance`) now fails
+  any PR that changes the `laravel/framework` constraint without also
+  touching `docs/adr/` or the decision log, so this specific failure
+  mode can't recur silently. No application code, dependency, or test
+  changed — documentation and CI configuration only.
+
 ### Fixed
 - Post-Session-5 correction: `vendor/` was being shadowed by the
   `app`/`worker` bind mounts in `docker-compose.yml` (no exclusion,

@@ -33,7 +33,7 @@ C4Container
     Person(staff, "Staff User")
 
     Container_Boundary(app, "privacy-forge instance") {
-        Container(web, "Web/API application", "Laravel 11", "Consent, DSAR, retention, RoPA, audit endpoints")
+        Container(web, "Web/API application", "Laravel 12", "Consent, DSAR, retention, RoPA, audit endpoints")
         Container(spa, "Admin SPA", "Vue 3 + Inertia", "Staff-facing interface")
         Container(widget, "Consent widget", "Vue 3 (embeddable)", "Third-party-site consent capture")
         Container(worker, "Queue workers", "Laravel Horizon", "Connector dispatch, retention execution, export assembly")

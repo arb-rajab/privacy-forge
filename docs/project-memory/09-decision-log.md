@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-17 (Session 18)
+> Last updated: 2026-08-18 (Session 20)
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -41,6 +41,40 @@ detail.
 - **Must not be silently reversed because:** FR-009's "independently
   tracked, partial-failure-visible" requirement is not satisfiable with a
   synchronous design without reintroducing head-of-line blocking.
+
+## ADR-0008 — Retroactive Adoption of Laravel 12.x (correcting undocumented drift)
+- **Date:** 2026-08-18 · **Status:** accepted (retroactive) · [Full ADR](../adr/ADR-0008-laravel-12-retroactive-adoption.md)
+- **Decision:** Laravel `^12.61.1` (locked at `v12.66.0`) is formally
+  adopted as the decided framework version, superseding the Session 0
+  ledger's "Laravel 11" allocation. The version itself is not changing —
+  the codebase has run exclusively on Laravel 12.x since a correction
+  commit early in Session 5 (`97868f1`); this ADR only now records that
+  as a real decision instead of silent drift.
+- **How this happened (forensic finding, Session 20):** commit `97868f1`
+  bumped `laravel/framework` from `^11.0` to `^12.61.1` in its
+  `composer.json` diff, while that exact commit's own `CHANGELOG.md` and
+  session-handoff entries state at length that the same bump (raised by
+  a claimed CVE) was considered and **declined** as unverifiable. The
+  narrated decision and the committed diff directly contradict each
+  other — the bump was evaluated, written up as rejected, and never
+  reverted before the commit was made. Session 6a (`30dffc1`) later
+  verified the CVE didn't apply to Laravel 11.x and concluded "no ADR
+  needed... this can be considered closed" — correct about the CVE,
+  wrong about the repository's actual state, because it trusted Session
+  5's narrative instead of opening `composer.json`. No session between
+  6a and 19 ever cross-checked the file against the docs either.
+- **Must not be silently reversed because:** `composer.lock` has pinned
+  Laravel to `v12.66.0` since Session 6a's first real build
+  (`d0785f2`) — every session's feature code, migrations, and all 165
+  Pest tests have only ever been written and run against Laravel 12.
+  Reverting to 11 now would mean executing 14 sessions of code against a
+  major version it has never once actually run on, for no functional or
+  security benefit (the triggering CVE never applied to 11.x either).
+- **Safeguard added:** `.github/workflows/ci.yml`'s new
+  `dependency-governance` job fails any PR that changes the
+  `laravel/framework` constraint without also touching `docs/adr/` or
+  this decision log — closing the exact gap that let this drift go
+  unrecorded for 14 sessions.
 
 ## ADR-0007 — Cross-Field Comparison Operator in Policy Conditions
 - **Date:** 2026-08-14 · **Status:** accepted · [Full ADR](../adr/ADR-0007-policy-condition-cross-field-comparison.md)

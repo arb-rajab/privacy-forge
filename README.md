@@ -20,7 +20,7 @@ personal data lawfully" — without an enterprise compliance-platform budget.
 - Attribute-based access control (ABAC), OWASP ASVS L2 mapping, tamper-evident
   audit logging.
 
-Stack: Laravel 11 · Vue 3 (Inertia) · PostgreSQL · Redis · S3-compatible
+Stack: Laravel 12 · Vue 3 (Inertia) · PostgreSQL · Redis · S3-compatible
 storage.
 
 ## Project status

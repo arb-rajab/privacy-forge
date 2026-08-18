@@ -5,6 +5,17 @@
 > architecture").
 > Last updated: 2026-08-08
 
+> **Superseding note (Session 20, 2026-08-18, added above the frozen
+> content below rather than editing it — see this file's own closing
+> governance note):** the "Primary backend: Laravel 11" row below reflects
+> the allocation as it stood at Session 0 and is left as-is for historical
+> accuracy. The repository has actually run on Laravel 12 (`^12.61.1`)
+> since early in Session 5, through undocumented drift rather than a
+> deliberate decision — see **ADR-0008** (`docs/adr/ADR-0008-laravel-12-retroactive-adoption.md`)
+> for the full forensic account and the retroactive decision to keep
+> Laravel 12. Treat "Laravel 12" as this repository's actual, current,
+> decided backend version wherever this row is cited.
+
 ## Ledger row (from master Framework Allocation Ledger)
 
 | Field | Value |

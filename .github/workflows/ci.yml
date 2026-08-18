@@ -7,6 +7,35 @@ on:
     branches: [main]
 
 jobs:
+  dependency-governance:
+    name: Framework version changes require a decision record
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check laravel/framework constraint changes are backed by an ADR or decision-log entry
+        # Root cause this guards against (ADR-0008, docs/project-memory/09-decision-log.md,
+        # Session 20): a Session 5 commit changed the laravel/framework
+        # constraint in composer.json while its own commit message and docs
+        # said the opposite ("declined, not applied") — nobody diffed the
+        # file against the docs for 14 sessions. This check makes that
+        # comparison mechanical instead of relying on a human noticing.
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.event.pull_request.base.ref }}"
+          if git diff "$BASE"...HEAD -- composer.json | grep -qE '^[+-].*"laravel/framework"[[:space:]]*:'; then
+            echo "composer.json changes the laravel/framework constraint in this PR."
+            if git diff --name-only "$BASE"...HEAD | grep -qE '^docs/(adr/|project-memory/09-decision-log\.md)'; then
+              echo "OK: PR also touches docs/adr/ or the decision log."
+            else
+              echo "::error::composer.json changes the laravel/framework constraint, but this PR touches neither docs/adr/ nor docs/project-memory/09-decision-log.md. A framework version change must be a recorded decision (see ADR-0008 for why this matters), not a silent side effect. Add an ADR (or a decision-log entry for a smaller change) explaining why before merging."
+              exit 1
+            fi
+          fi
+
   secrets-scan:
     name: Secret scanning (gitleaks)
     runs-on: ubuntu-latest
