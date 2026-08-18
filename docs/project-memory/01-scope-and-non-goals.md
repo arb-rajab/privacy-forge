@@ -109,13 +109,21 @@ closed this session by the explicit descoping decision above, not by
 quietly relaxing its wording. **This does not by itself mean v1.0.0 can be
 tagged — see the Definition of "v1 complete" below; conditions 2 and 3 are
 independent of this checklist and are not confirmed as of Session 24. See
-`12-session-handoff.md`'s Session 24 account for the full assessment
-against all four conditions, including a newly found gap in condition 3
-(the Gate 9→10 checklist file this document itself cites,
-`04-session-system-and-templates.md`, does not exist anywhere in this
-repository — flagged here rather than silently left for a future session
-to trip over, the same discipline this document already used for the
-Session 8 restore-drill cross-reference above).**
+`12-session-handoff.md`'s Session 24 account for the assessment against
+all four conditions. **Correction to that account:** Session 24 flagged
+condition 3's checklist citation, `04-session-system-and-templates.md`, as
+a documentation gap — that citation was actually just wrong, not missing:
+it named a portfolio-level cross-repo planning document that was never
+meant to be copied into this repository, not one of this repo's own
+Project Memory Pack files (those are numbered `00`–`14`; `04` in that set
+is `04-data-model.md`, unrelated). The citation is fixed above. Condition
+3 itself was independently re-checked on its real substance (see
+`12-session-handoff.md`): the README quickstart genuinely works end to
+end on a freshly rebuilt stack (verified, not merely asserted), but the
+architecture diagrams in `03-architecture.md` are stale (missing
+ADR-0006/0007/0008), no demo asset exists, and no case study has been
+published — condition 3 is honestly unmet on those merits, independent of
+the now-corrected citation.
 
 ## Explicit non-goals
 
@@ -149,10 +157,16 @@ v1.0.0 may be tagged only when:
    criteria in `02-requirements.md`).
 2. All five success metrics in `00-project-brief.md` are met and verifiable
    by a third party, not just asserted.
-3. The Gate 9→10 checklist in the session system (`04-session-system-and-
-   templates.md`) passes: README quickstart verified on a clean machine,
-   diagrams current, demo available, SDLC evidence map complete, case study
-   published.
+3. The Gate 9→10 checklist — defined at the portfolio level, in the
+   cross-repo session-system document, not as a file inside this repository
+   — passes: README quickstart verified on a clean machine, diagrams
+   current, demo available, SDLC evidence map complete, case study
+   published. (Previously this item cited an in-repo file,
+   `04-session-system-and-templates.md`, as the checklist's home — that
+   citation was wrong: it named a portfolio-level planning document never
+   intended to live in this repository's git history, not one of this
+   repo's own numbered Project Memory Pack files. Corrected; see
+   `12-session-handoff.md` for the account of finding and fixing it.)
 4. No item in the non-goals table above has silently crept back into scope.
    (This check is deliberately manual, at tag time, precisely because scope
    creep is incremental and easy to miss commit-by-commit.)

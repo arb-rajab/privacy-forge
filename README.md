@@ -1,11 +1,16 @@
 # privacy-forge
 
-> **Status:** 🚧 Session 13 — consent capture, DSAR lifecycle, retention,
-> RoPA export, and ABAC are all implemented and tested; the embeddable
-> consent widget and public DSAR portal (this session) close the last
-> UI gap for a self-hostable v1. Not yet tagged v1.0.0 — see
+> **Status:** v1.0.0-pending. Consent capture, the DSAR lifecycle
+> (intake → identity verification → erasure approval, with a real
+> separation-of-duties denial enforced by ABAC), retention policies,
+> RoPA export, and a tamper-evident, externally-anchored audit log are
+> all implemented, tested, and reachable through real staff/data-subject
+> UI, not just an API. See [`docs/CASE-STUDY.md`](docs/CASE-STUDY.md) for
+> the engineering account (including the real bugs found and a Laravel
+> version governance incident), [`docs/demo/`](docs/demo/) for real
+> screenshots of the running application, and
 > [`docs/project-memory/12-session-handoff.md`](docs/project-memory/12-session-handoff.md)
-> for exactly what remains.
+> for the exact, current tagging status.
 
 A self-hostable consent, data-subject-request (DSAR), and data-retention
 engine for small SaaS teams who need a defensible answer to "prove you handle
@@ -25,14 +30,49 @@ storage.
 
 ## Project status
 
-This repository is built through a session-based workflow. Current phase:
-**Session 5 (Environment, Standards, CI Baseline) — complete.** Next:
-Session 6 (Feature Implementation — first vertical slice).
+All nine items in the MVP boundary checklist
+(`docs/project-memory/01-scope-and-non-goals.md`) are complete and
+working end-to-end against a real running stack, not just coded:
+
+- **Consent:** purpose/notice registry, an embeddable consent widget
+  genuinely proven on a third-party static HTML page, capture and
+  withdrawal.
+- **DSAR lifecycle:** public intake portal, staff-facing identity
+  verification and erasure approval (two different admins, enforced by
+  ABAC separation-of-duties — ADR-0007), connector dispatch/callback,
+  export bundles delivered via a short-TTL signed URL, deletion
+  certificates.
+- **Retention:** per-category policies, a dry-run preview that is
+  structurally guaranteed to select the same records a real run would
+  (ADR-0002), scheduled execution, execution history.
+- **RoPA export**, CSV and PDF, generated on demand.
+- **ABAC authorisation** across every sensitive action, fail-closed by
+  default (ADR-0006), with a real cross-field separation-of-duties
+  operator (ADR-0007) — exhaustively tested against every (role × action)
+  pair.
+- **Tamper-evident audit log:** a hash chain plus periodic external
+  anchoring (ADR-0003), proven against a real full-chain-rewrite attack
+  simulation, not just asserted.
+
+One risk is carried forward as an accepted residual, not silently
+dropped: the browser-driven end-to-end test suite hangs on Docker-launched
+Chromium on this host class (`R-08` in
+`docs/project-memory/10-risk-register.md`), so client-side rendering of
+the admin dashboard is verified by a real HTTP walkthrough against the
+live backend rather than an automated browser click. The real screenshots
+in [`docs/demo/`](docs/demo/) were captured by a different mechanism
+specifically to sidestep that constraint, not to paper over it.
+
+For the full account of how this was built — including the real bugs
+found along the way and a Laravel-version governance incident resolved
+by forensic git-history investigation — see
+[`docs/CASE-STUDY.md`](docs/CASE-STUDY.md).
 
 Full portfolio context: this is a flagship repository in a broader
 public/private software portfolio. See `docs/project-memory/` for the
-complete project memory pack, and `docs/SDLC-EVIDENCE.md` (populated at
-Session 9) for the phase-by-phase evidence map.
+complete project memory pack (including `12-session-handoff.md` for the
+exact, current v1.0.0-tagging status) and `docs/SDLC-EVIDENCE.md` for the
+phase-by-phase evidence map.
 
 ## Quickstart
 
@@ -48,6 +88,10 @@ docker compose exec app php artisan migrate
 Then visit `http://localhost:8000`. See `CONTRIBUTING.md` for the full
 development workflow, including running tests, lint, and static analysis.
 
+Want to see it before running it? [`docs/demo/`](docs/demo/) has real
+screenshots of the walkthrough below, captured from an actual running
+instance.
+
 ## Try it: consent → withdrawal → DSAR → export/erasure, in under 15 minutes
 
 This is the walkthrough behind Success Metric #1 in
@@ -59,7 +103,7 @@ this README alone. It assumes the Quickstart above is already done
 **0. One-time bootstrap.** A fresh instance has no active ABAC policies
 (R-02, formerly in
 [`docs/project-memory/10-risk-register.md`](docs/project-memory/10-risk-register.md),
-closed this session) and no consent purpose/connector to try the widget
+closed at Session 16) and no consent purpose/connector to try the widget
 against. Run the real seeder and the reference-connector registration
 command — no tinker, no shell access to application internals:
 
@@ -97,7 +141,7 @@ Copy the printed purpose id — you'll need it in step 1. `exit` tinker
 when done.
 
 **Staff accounts, unlike the above, do not need tinker at all** (R-05 in
-`10-risk-register.md`, closed this session — real staff login now exists).
+`10-risk-register.md`, closed at Session 14 — real staff login now exists).
 Create your first Owner account with a dedicated artisan command instead:
 
 ```bash
@@ -138,7 +182,7 @@ as intended, not a bug.)
 **4. Check completion.** Reload your bookmarked status page from step 2.
 The reference connector registered in step 0 has a real, built-in
 webhook receiver (`App\Http\Controllers\ReferenceConnectorWebhookController`,
-this session's R-06 fix) — it genuinely receives the signed webhook
+R-06's Session 16 fix) — it genuinely receives the signed webhook
 `DispatchConnectorTaskJob` sends and genuinely calls back with its own
 signed response, so the status reaches **`complete`**, with a deletion
 certificate attached (FR-011), usually within a few seconds and reliably
@@ -149,10 +193,11 @@ connectors are still meant to be external, third-party-operated
 services in production — this reference/stub is what proves the
 contract works at all, which is exactly what a fresh instance's first
 erasure needs to demonstrate. If you registered a *different* connector
-of your own instead, pointed at a `webhook_url` nothing answers, you'll
-see the same honest `partially_complete` outcome this README described
-before this session — that failure path is correct behaviour, not a
-bug, per FR-009.
+of your own instead, pointed at a `webhook_url` nothing answers (or the
+reference connector's own delivery genuinely fails, as happened when
+`docs/demo/`'s screenshots were captured), you'll see an honest
+`partially_complete` outcome instead — that failure path is correct
+behaviour, not a bug, per FR-009.
 
 **5. Withdraw.** Go back to the widget page from step 1 (or reload it —
 it remembers your consent via `localStorage`) and click **Withdraw

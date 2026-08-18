@@ -1,7 +1,7 @@
 # Architecture
 > Purpose: how the system is structured and why.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-11
+> Last updated: 2026-08-18
 
 ## System context diagram
 
@@ -78,6 +78,29 @@ never inside a worker, and never bypassed by a worker acting on
 already-authorised work handed to it.** This boundary matters: it means a
 compromised or buggy worker cannot grant itself new permissions by skipping
 a check a worker was never meant to perform in the first place.
+
+Two further properties of the evaluator are load-bearing, not incidental,
+and are named here rather than left implicit:
+
+- **Fail-closed by default (ADR-0006).** Any condition where the evaluator
+  cannot reach a clear, unambiguous "allow" — a missing policy, a malformed
+  condition, an exception during evaluation, a data-access failure while
+  fetching policy rows — is a `deny`, not an `allow`. Every fail-closed
+  denial is written to the audit log with a distinguishing reason code
+  (`policy_missing`, `evaluation_error`) so an operator can tell "denied by
+  design" apart from "the evaluator itself is broken." This is why a bug or
+  outage in the policy-evaluation path degrades to "nothing sensitive can be
+  approved" rather than "everything is quietly approved."
+- **Cross-field comparison in policy conditions (ADR-0007).** The condition
+  matcher supports `not_equals_attribute` alongside `in`/`equals`, resolving
+  a `"bag.attribute"` reference against all three attribute bags
+  (`subject`/`resource`/`environment`) rather than only comparing against a
+  fixed value baked into the policy row. This is what separation-of-duties
+  actually runs on: the `dsar.erasure.approve` policy's
+  `id: {"not_equals_attribute": "resource.identity_verified_by"}` condition
+  is an ordinary policy row, not a controller `if`, so it lives in the same
+  policy registry, audit trail, and exhaustive test suite (NFR-005) as every
+  other rule.
 
 ## Key flows
 
@@ -220,6 +243,9 @@ actual restore drill at Session 8 (not just asserted here).
 | Hash-chained audit log with external anchoring, plus DB-level grants | ADR-0003 |
 | Async, queue-based connector webhook contract | ADR-0004 |
 | No tenant column anywhere in the schema | ADR-0005 |
+| Fail-closed default for the `PolicyEvaluator` on any evaluation error | ADR-0006 |
+| Cross-field comparison operator (`not_equals_attribute`) in policy conditions, powering separation-of-duties | ADR-0007 |
+| Laravel 12.x retroactively adopted as the decided framework version, correcting undocumented drift from the frozen Session 0 "Laravel 11" ledger allocation | ADR-0008 |
 
-All five ADRs are cross-referenced from `09-decision-log.md`; full reasoning
+All eight ADRs are cross-referenced from `09-decision-log.md`; full reasoning
 lives in `docs/adr/`.
