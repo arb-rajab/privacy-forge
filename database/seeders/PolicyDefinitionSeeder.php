@@ -62,6 +62,15 @@ class PolicyDefinitionSeeder extends Seeder
                 'subject_conditions' => ['role' => ['in' => ['owner', 'privacy_manager']]],
                 'resource_conditions' => [],
             ],
+            // Session 21 (B-04): audit.log.view — Owner or Privacy Manager
+            // may reach GET /admin/audit-log at all; row-level scope (full
+            // log vs. own-actions-only) is applied in
+            // Admin\AuditLogController, not here.
+            [
+                'action_name' => 'audit.log.view',
+                'subject_conditions' => ['role' => ['in' => ['owner', 'privacy_manager']]],
+                'resource_conditions' => [],
+            ],
         ];
 
         foreach ($policies as $policy) {

@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreRetentionPolicyRequest;
 use App\Http\Requests\UpdateRetentionPolicyRequest;
+use App\Http\Resources\RetentionExecutionResource;
 use App\Http\Resources\RetentionPolicyResource;
+use App\Models\RetentionExecution;
 use App\Models\RetentionPolicy;
 use App\Models\User;
 use App\Services\PolicyEvaluator;
@@ -183,6 +185,43 @@ class RetentionPolicyController extends Controller
             'affected_record_count' => $result['execution']->affected_record_count,
             'sample_record_ids' => $result['sampleIds'],
         ]);
+    }
+
+    // B-05: past dry-run and real executions of one policy, each with its
+    // linked DeletionCertificate when one exists (real executions only —
+    // RetentionExecutor::preview() never creates one). Shares the same
+    // retention.policy.manage gate as every other action on this
+    // controller, including the dry-run preview above — this is a read
+    // endpoint on the same resource, not a new sensitive action, matching
+    // the "index/show share the gate" reasoning this controller's class
+    // comment already establishes for index()/show()/dryRun().
+    public function executions(Request $request, string $policyId): AnonymousResourceCollection|JsonResponse
+    {
+        $policy = RetentionPolicy::query()->findOrFail($policyId);
+
+        $actor = $request->user();
+        if (! $actor instanceof User) {
+            abort(401);
+        }
+
+        $decision = $this->policyEvaluator->evaluate(
+            action: 'retention.policy.manage',
+            actor: $actor,
+            resourceType: 'retention_policy',
+            resourceId: $policy->id,
+        );
+
+        if (! $decision->allowed) {
+            return $this->denied($decision->policyId);
+        }
+
+        $executions = RetentionExecution::query()
+            ->where('retention_policy_id', $policy->id)
+            ->with('deletionCertificate')
+            ->orderByDesc('executed_at')
+            ->get();
+
+        return RetentionExecutionResource::collection($executions);
     }
 
     private function denied(?string $policyId): JsonResponse

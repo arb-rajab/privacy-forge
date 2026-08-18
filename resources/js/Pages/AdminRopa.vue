@@ -51,6 +51,7 @@ async function download(format) {
       · <a href="/admin/dsar">DSAR queue</a>
       · <a href="/admin/retention">Retention policies</a>
       · <a href="/admin/policies">ABAC policies</a>
+      · <a href="/admin/audit-log">Audit log</a>
     </p>
 
     <p>

@@ -180,6 +180,21 @@ metric #5).
    level (T-20), carried forward from Session 1 and finalised operationally
    at Session 8.
 
+**Implementation status (Session 22, 2026-08-18) — the design above is
+unchanged; this records what actually exists in code today, not a
+revision to the controls themselves:**
+
+| Control | Status |
+|---|---|
+| 1. Scheduled reset | **Code exists, not deployed.** `App\Console\Commands\ResetDemoInstanceCommand` (`demo:reset`) truncates every subject/activity table and re-seeds the standard baseline; refuses to run unless `config('demo.enabled')` is true. Scheduled in `routes/console.php` via the configurable `DEMO_RESET_SCHEDULE`. Never run against a real deployment. |
+| 2. No persistent shared admin credential | **Not designed.** Filed as `B-08` — a real open question (how a visitor gets a session without a real login or a long-lived shared credential), not yet attempted. |
+| 3. Connector registration disabled entirely | **Already structurally satisfied**, as a side effect of Session 10's unrelated decision that connector management is CLI-only with exactly one registration command (the reference/stub connector). No code change made or needed. |
+| 4. Visible warning banner | **Built.** `demoMode` is now a globally-shared Inertia prop (`HandleInertiaRequests`); `Welcome.vue` renders the banner when it's true. Not yet seen on a real public deployment, since none exists. |
+| 5. Isolation, spend cap, scoped credentials | **Not started.** Infrastructure-level; blocked on a hosting target, which has never been decided (see `12-session-handoff.md`'s Part B plan). |
+
+See `09-decision-log.md`'s Session 22 entries for the full reasoning
+behind what was and wasn't built.
+
 ## Accepted risks
 
 | Risk | Reason accepted | Revisit trigger |

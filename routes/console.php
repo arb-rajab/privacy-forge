@@ -5,17 +5,16 @@
 | Console Routes
 |--------------------------------------------------------------------------
 |
-| Scheduled jobs land here at Session 6/8/17: retention execution
+| Scheduled jobs land here at Session 6/8/17/22: retention execution
 | (ADR-0002), the audit-log chain-anchoring job (ADR-0003), and the
 | demo-instance scheduled reset (docs/project-memory/06-security-threat-model.md,
-| Demo Instance Data Safety). The demo reset remains unbuilt — retention
-| execution (US-012, Session 11) and the audit-log anchor (R-04, Session
-| 17) are registered below.
+| Demo Instance Data Safety, control 1).
 |
 */
 
 use App\Console\Commands\AnchorAuditChainCommand;
 use App\Console\Commands\ExecuteRetentionPoliciesCommand;
+use App\Console\Commands\ResetDemoInstanceCommand;
 use Illuminate\Support\Facades\Schedule;
 
 // US-012: every active retention policy is re-evaluated once daily — see
@@ -31,3 +30,13 @@ Schedule::command(ExecuteRetentionPoliciesCommand::class)->daily();
 // tighter cadence, and anchorChain() is idempotent when the chain hasn't
 // grown since the last run, so this is cheap even when overdue.
 Schedule::command(AnchorAuditChainCommand::class)->hourly();
+
+// This registration is unconditional, the same "registration always
+// happens, the command decides" shape as retention execution above —
+// ResetDemoInstanceCommand itself refuses to act unless config('demo.
+// enabled') is true, so this entry is inert on any real self-hosted
+// instance that hasn't explicitly set DEMO_MODE=true. The cron
+// expression is configurable (DEMO_RESET_SCHEDULE, .env.example) rather
+// than hardcoded, since the actual reset cadence is a deployment-time
+// decision, not a compile-time one.
+Schedule::command(ResetDemoInstanceCommand::class)->cron(config('demo.reset_schedule'));

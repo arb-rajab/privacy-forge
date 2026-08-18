@@ -90,4 +90,22 @@ class PolicyDefinitionFactory extends Factory
             'resource_conditions' => [],
         ]);
     }
+
+    // Session 21 (B-04) — audit.log.view, the sixth registered sensitive
+    // action. Owner or Privacy Manager may reach the endpoint at all
+    // (Support Staff is explicitly barred from viewing the audit log at
+    // all, per the roles matrix); which rows a Privacy Manager sees once
+    // allowed (their own actions only, vs. an Owner's full log) is applied
+    // in Admin\AuditLogController, not expressed as a policy condition
+    // here — see that controller's class comment for why.
+    public function forAuditLogView(): static
+    {
+        return $this->state(fn () => [
+            'action_name' => 'audit.log.view',
+            'subject_conditions' => [
+                'role' => ['in' => ['owner', 'privacy_manager']],
+            ],
+            'resource_conditions' => [],
+        ]);
+    }
 }

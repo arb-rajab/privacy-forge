@@ -4,9 +4,13 @@ import { usePage } from '@inertiajs/vue3'
 
 // Retention policy management (US-010/US-011, ADR-0002). Matches
 // AdminDsarQueue.vue's house style (plain fetch(), no useForm/Layout).
-// Backed unchanged by Admin\DataCategoryController /
-// Admin\RetentionPolicyController (retention.policy.manage, Session 11)
-// — no new endpoints.
+// Backed by Admin\DataCategoryController / Admin\RetentionPolicyController
+// (retention.policy.manage, Session 11). The "past execution history"
+// section below was an honest placeholder until this session (B-05):
+// GET /api/v1/admin/retention-policies/{id}/executions is the one new
+// endpoint this page now calls, sharing the same retention.policy.manage
+// gate as every other action here — see that controller's `executions()`
+// method.
 //
 // The one thing this page is careful about: there is no "run real
 // execution now" button anywhere below, and that is deliberate, not a
@@ -33,6 +37,12 @@ const policyState = ref({ busy: false, error: null })
 
 // policyId -> { busy, error, preview: { affected_record_count, sample_record_ids } | null }
 const previewState = ref({})
+
+// policyId -> { busy, error, executions: array | null } — executions is
+// null until "View history" is clicked for that policy (not fetched
+// up front for every policy on page load).
+const historyState = ref({})
+const selectedHistoryPolicyId = ref('')
 
 function headers() {
   return {
@@ -144,6 +154,30 @@ async function runDryRun(policy) {
   }
 }
 
+// B-05: real execution history, fetched for one policy at a time (chosen
+// from the dropdown below) rather than eagerly for every policy on page
+// load — this page may list many policies; most staff visits won't need
+// every one's history at once.
+async function loadHistory(policyId) {
+  if (!policyId) return
+  historyState.value = { ...historyState.value, [policyId]: { busy: true, error: null, executions: historyState.value[policyId]?.executions ?? null } }
+  try {
+    const response = await fetch(`/api/v1/admin/retention-policies/${policyId}/executions`, {
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      const body = await response.json()
+      historyState.value = { ...historyState.value, [policyId]: { busy: false, error: body.detail || body.title || `Request failed (${response.status})`, executions: null } }
+      return
+    }
+
+    const executions = await response.json()
+    historyState.value = { ...historyState.value, [policyId]: { busy: false, error: null, executions } }
+  } catch (error) {
+    historyState.value = { ...historyState.value, [policyId]: { busy: false, error: error.message, executions: null } }
+  }
+}
+
 onMounted(loadAll)
 </script>
 
@@ -155,6 +189,7 @@ onMounted(loadAll)
       · <a href="/admin/dsar">DSAR queue</a>
       · <a href="/admin/ropa">RoPA export</a>
       · <a href="/admin/policies">ABAC policies</a>
+      · <a href="/admin/audit-log">Audit log</a>
     </p>
 
     <div
@@ -435,14 +470,73 @@ onMounted(loadAll)
       <section>
         <h2>Past execution history</h2>
         <p>
-          Not shown here: no read endpoint currently exists for past
-          <code>RETENTION_EXECUTION</code> records or their deletion
-          certificates (checked <code>docs/architecture/openapi.yaml</code>
-          — only the dry-run preview and per-DSAR deletion certificates
-          are exposed over HTTP today). Rather than fake this with a
-          misleading placeholder, this is flagged as a real, open backlog
-          gap — see the session handoff for the recommended follow-up.
+          Every dry-run and real execution of a policy is recorded — pick
+          a policy below to see its history, most recent first, including
+          the deletion certificate a real execution produced (a dry run
+          never produces one, ADR-0002).
         </p>
+
+        <label for="history_policy">Policy</label>
+        <select
+          id="history_policy"
+          v-model="selectedHistoryPolicyId"
+          @change="loadHistory(selectedHistoryPolicyId)"
+        >
+          <option value="">
+            Select a policy
+          </option>
+          <option
+            v-for="policy in policies"
+            :key="policy.id"
+            :value="policy.id"
+          >
+            {{ categoryName(policy.data_category_id) }} v{{ policy.version }} ({{ policy.status }})
+          </option>
+        </select>
+
+        <template v-if="selectedHistoryPolicyId">
+          <p v-if="historyState[selectedHistoryPolicyId]?.busy">
+            Loading…
+          </p>
+          <p
+            v-else-if="historyState[selectedHistoryPolicyId]?.error"
+            role="alert"
+          >
+            {{ historyState[selectedHistoryPolicyId].error }}
+          </p>
+          <p v-else-if="historyState[selectedHistoryPolicyId]?.executions?.length === 0">
+            No executions recorded yet for this policy.
+          </p>
+          <table v-else-if="historyState[selectedHistoryPolicyId]?.executions">
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>Affected records</th>
+                <th>Executed at</th>
+                <th>Certificate</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="execution in historyState[selectedHistoryPolicyId].executions"
+                :key="execution.id"
+              >
+                <td>{{ execution.mode === 'real' ? 'Real execution' : 'Dry run (preview)' }}</td>
+                <td>{{ execution.affected_record_count }}</td>
+                <td>{{ execution.executed_at }}</td>
+                <td>
+                  <span v-if="!execution.certificate">—</span>
+                  <span v-else>
+                    {{ execution.certificate.summary }}
+                    <template v-if="execution.certificate.exceptions">
+                      <br><strong>Exceptions:</strong> {{ execution.certificate.exceptions }}
+                    </template>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
     </template>
   </div>

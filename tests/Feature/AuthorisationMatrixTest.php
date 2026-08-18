@@ -17,27 +17,32 @@ use App\Models\User;
 // DSAR identity verification, DSAR export approval, DSAR erasure
 // approval, retention policy execution, and audit log access. ADR-0006
 // adds policy.update; Session 11 adds retention.policy.manage; Session 12
-// adds ropa.export. Reading the actual `PolicyEvaluator::evaluate()` call
-// sites in app/Http/Controllers is the only reliable source of truth for
-// what is *actually* registered and gated. As of Session 12, there are
-// exactly five:
+// adds ropa.export; Session 21 (B-04) adds audit.log.view. Reading the
+// actual `PolicyEvaluator::evaluate()` call sites in
+// app/Http/Controllers is the only reliable source of truth for what is
+// *actually* registered and gated. As of Session 21, there are exactly six:
 //   - dsar.identity.verify       (App\Http\Controllers\Admin\DsarController::verifyIdentity)
 //   - dsar.erasure.approve       (App\Http\Controllers\Admin\DsarController::approveErasure)
 //   - policy.update              (App\Http\Controllers\Admin\PolicyController::index/show/update)
 //   - retention.policy.manage    (App\Http\Controllers\Admin\DataCategoryController::index/store,
-//                                  App\Http\Controllers\Admin\RetentionPolicyController::index/show/store/update/dryRun)
+//                                  App\Http\Controllers\Admin\RetentionPolicyController::index/show/store/update/dryRun/executions)
 //   - ropa.export                (App\Http\Controllers\Admin\RopaController::export)
+//   - audit.log.view             (App\Http\Controllers\Admin\AuditLogController::index)
 // "DSAR export approval" was never built as a separate gate — Session 8
 // wired export/access dispatch to fire at identity-verification time
 // instead (see DsarController::verifyIdentity's comment), so it is not a
 // distinct action to test; it is already covered by the
-// dsar.identity.verify rows below. Audit log access still has no
-// controller, route, or PolicyDefinition action_name in use anywhere in
-// the codebase — **not applicable yet**, not silently omitted; see the
-// "Not-yet-built sensitive actions" section below. Retention policy
-// *execution* (the specific action ADR-0001 originally anticipated,
-// gating the scheduled real-run itself) is also addressed there — it is
+// dsar.identity.verify rows below. Retention policy *execution* (the
+// specific action ADR-0001 originally anticipated, gating the scheduled
+// real-run itself) is addressed in its own dedicated test below — it is
 // deliberately NOT ABAC-gated, by design, not because it was forgotten.
+// audit.log.view's *allow/deny* cell is covered here like every other
+// action; the row-level scoping difference between Owner ("full audit
+// log") and Privacy Manager ("entries related to their actions") is a
+// separate concern from allow/deny and is covered instead in
+// tests/Feature/AuditLogQueryTest.php, per the same
+// cross-reference-rather-than-duplicate approach used elsewhere in this
+// file.
 //
 // policy.update (Session 10, closing R-03 —
 // docs/project-memory/10-risk-register.md): PolicyController exposes
@@ -77,6 +82,14 @@ use App\Models\User;
 // tests/Feature/RopaExportTest.php, per the same
 // cross-reference-rather-than-duplicate approach used elsewhere in this
 // file.
+//
+// audit.log.view (Session 21, B-04): a single GET endpoint —
+// App\Http\Controllers\Admin\AuditLogController::index — gated the same
+// Owner-or-Privacy-Manager allow/deny shape as retention.policy.manage
+// and ropa.export. Tested here as the representative endpoint for
+// allow/deny; the row-level scoping this action's controller applies on
+// top of that (Owner sees every entry, Privacy Manager sees only their
+// own) is covered separately in tests/Feature/AuditLogQueryTest.php.
 //
 // Roles tested: Owner, Privacy Manager, Support Staff (all real `users`
 // rows — the `role` column is a 3-value DB enum, confirmed by reading
@@ -142,6 +155,12 @@ dataset('nfr005_role_action_matrix', [
     'Support Staff × ropa.export → deny' => ['support_staff', 'ropa.export', 'deny'],
     'Data Subject × ropa.export → deny (unauthenticated)' => ['data_subject', 'ropa.export', 'deny'],
     'Connector × ropa.export → deny (unauthenticated)' => ['connector', 'ropa.export', 'deny'],
+
+    'Owner × audit.log.view → allow' => ['owner', 'audit.log.view', 'allow'],
+    'Privacy Manager × audit.log.view → allow' => ['privacy_manager', 'audit.log.view', 'allow'],
+    'Support Staff × audit.log.view → deny' => ['support_staff', 'audit.log.view', 'deny'],
+    'Data Subject × audit.log.view → deny (unauthenticated)' => ['data_subject', 'audit.log.view', 'deny'],
+    'Connector × audit.log.view → deny (unauthenticated)' => ['connector', 'audit.log.view', 'deny'],
 ]);
 
 test('(role × sensitive action) matrix cell matches the documented permissions matrix', function (string $roleLabel, string $action, string $expected) {
@@ -150,6 +169,7 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
     PolicyDefinition::factory()->forPolicyUpdate()->create(); // policy.update, v1, active
     PolicyDefinition::factory()->forRetentionPolicyManage()->create(); // retention.policy.manage, v1, active
     PolicyDefinition::factory()->forRopaExport()->create(); // ropa.export, v1, active
+    PolicyDefinition::factory()->forAuditLogView()->create(); // audit.log.view, v1, active
 
     // A distinct "someone else" verifier so dsar.erasure.approve's own
     // separation-of-duties condition never fires as a side effect of
@@ -173,16 +193,16 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
             'identity_verified_by' => $otherVerifier->id,
             'identity_verified_at' => now(),
         ]),
-        'policy.update', 'retention.policy.manage', 'ropa.export' => null,
+        'policy.update', 'retention.policy.manage', 'ropa.export', 'audit.log.view' => null,
     };
 
     $resourceId = match ($action) {
         'policy.update' => $targetPolicy->id,
-        // DataCategoryController::store and RopaController::export both
-        // evaluate against the same nil-UUID "no single resource yet"
-        // sentinel PolicyController's index() uses — neither acts on one
-        // specific pre-existing row.
-        'retention.policy.manage', 'ropa.export' => '00000000-0000-0000-0000-000000000000',
+        // DataCategoryController::store, RopaController::export, and
+        // AuditLogController::index all evaluate against the same
+        // nil-UUID "no single resource yet" sentinel PolicyController's
+        // index() uses — none acts on one specific pre-existing row.
+        'retention.policy.manage', 'ropa.export', 'audit.log.view' => '00000000-0000-0000-0000-000000000000',
         default => $dsar->id,
     };
 
@@ -192,6 +212,7 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         'policy.update' => "/api/v1/admin/policies/{$targetPolicy->id}",
         'retention.policy.manage' => '/api/v1/admin/data-categories',
         'ropa.export' => '/api/v1/admin/ropa/export?format=csv',
+        'audit.log.view' => '/api/v1/admin/audit-log',
     };
 
     $actor = match ($roleLabel) {
@@ -216,6 +237,8 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
         $action === 'retention.policy.manage' => $this->actingAs($actor)->postJson($endpoint, $retentionPayload),
         $action === 'ropa.export' && $actor === null => $this->getJson($endpoint),
         $action === 'ropa.export' => $this->actingAs($actor)->getJson($endpoint),
+        $action === 'audit.log.view' && $actor === null => $this->getJson($endpoint),
+        $action === 'audit.log.view' => $this->actingAs($actor)->getJson($endpoint),
         $actor === null => $this->postJson($endpoint),
         default => $this->actingAs($actor)->postJson($endpoint),
     };
@@ -223,8 +246,9 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
     if ($expected === 'allow') {
         // retention.policy.manage's representative endpoint is a POST
         // that creates a new DataCategory (201); every other action's
-        // representative endpoint (including ropa.export's GET) acts on an
-        // existing resource or returns a document, both 200.
+        // representative endpoint (including ropa.export's and
+        // audit.log.view's GETs) acts on an existing resource or returns a
+        // document/list, all 200.
         $response->assertStatus($action === 'retention.policy.manage' ? 201 : 200);
 
         $entry = AuditLogEntry::query()
@@ -268,9 +292,11 @@ test('(role × sensitive action) matrix cell matches the documented permissions 
 // be replaced with real matrix rows (see the dataset above) the session
 // that builds the corresponding action.
 //
-// retention.policy.manage (Session 11) is removed from this table, not
-// because it stopped being relevant, but because it moved into the real
-// coverage dataset above — the same way policy.update did at Session 10.
+// retention.policy.manage (Session 11) and audit.log.view (Session 21,
+// B-04) are both absent from this table, not because they stopped being
+// relevant, but because each moved into the real coverage dataset above
+// once its endpoint was built — the same way policy.update did at
+// Session 10.
 test('retention execution itself is deliberately not a separate registered ABAC action (Session 11, see docs/project-memory/09-decision-log.md)', function () {
     // ADR-0001 anticipated "retention policy execution" as a sensitive
     // action; this session found the scheduled real-run
@@ -284,8 +310,4 @@ test('retention execution itself is deliberately not a separate registered ABAC 
     // manual "run now" HTTP trigger — which *would* need its own gate —
     // has a failing assertion to update, not a silently stale comment.
     expect(PolicyDefinition::query()->where('action_name', 'retention.execution.run')->exists())->toBeFalse();
-});
-
-test('audit log access has no registered action yet — not applicable to this matrix (no endpoint gates it)', function () {
-    expect(PolicyDefinition::query()->where('action_name', 'like', 'audit_log.%')->exists())->toBeFalse();
 });

@@ -17,6 +17,7 @@
 |
 */
 
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ConsentNoticeController;
 use App\Http\Controllers\Admin\ConsentPurposeController;
 use App\Http\Controllers\Admin\DataCategoryController;
@@ -96,5 +97,15 @@ Route::prefix('v1')->group(function () {
         // ropa.export (Session 12, US-013/FR-016) — the fifth registered
         // sensitive action. Owner or Privacy Manager, per the roles matrix.
         Route::get('/ropa/export', [RopaController::class, 'export']);
+
+        Route::get('/retention-policies/{policyId}/executions', [RetentionPolicyController::class, 'executions']);
+
+        // audit.log.view (this session, B-04) — the sixth registered
+        // sensitive action, closing the gap where GET /admin/audit-log was
+        // documented in openapi.yaml but never implemented. Owner or
+        // Privacy Manager per the roles matrix; row-level scope (full log
+        // vs. own-actions-only) is applied inside AuditLogController, not
+        // here — see that controller's class comment.
+        Route::get('/audit-log', [AuditLogController::class, 'index']);
     });
 });

@@ -520,6 +520,35 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /admin/retention-policies/{policyId}/executions:
+    get:
+      tags: [Admin — Purposes and Policies]
+      summary: >
+        List past dry-run and real executions of one retention policy
+        (B-05), most recent first, each with its linked deletion
+        certificate when one exists (real executions only — a dry run
+        never produces one, ADR-0002). Shares the retention.policy.manage
+        gate with every other action on this resource, including the
+        dry-run preview above — not a new sensitive action.
+      security: [{ staffAuth: [] }]
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Past executions of this policy, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RetentionExecution' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /admin/ropa/export:
     get:
       tags: [Admin — RoPA and Audit]
@@ -551,7 +580,15 @@ paths:
   /admin/audit-log:
     get:
       tags: [Admin — RoPA and Audit]
-      summary: Query the tamper-evident audit log (FR-014, NFR-009)
+      summary: >
+        Query the tamper-evident audit log (FR-014, NFR-009). Gated by the
+        audit.log.view sensitive action (Owner or Privacy Manager; Support
+        Staff denied per the roles matrix). Row-level scope differs by
+        role rather than by policy_id/effect: an Owner sees every matching
+        entry ("view full audit log"); a Privacy Manager sees only entries
+        their own actions produced ("view audit log entries related to
+        their actions") — see Admin\AuditLogController's class comment for
+        why this is applied in the controller, not as an ABAC condition.
       security: [{ staffAuth: [] }]
       parameters:
         - name: resourceType
@@ -560,14 +597,26 @@ paths:
         - name: resourceId
           in: query
           schema: { type: string, format: uuid }
+        - name: since
+          in: query
+          description: Only entries created at or after this timestamp
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          description: Only entries created at or before this timestamp
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Matching entries, in chain order
+          description: Matching entries, in chain order, scoped per the caller's role
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AuditLogEntry' }
+        '403':
+          $ref: '#/components/responses/PolicyDenied'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /connector-callback/{taskId}:
     post:
@@ -878,6 +927,21 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: A sample, not necessarily exhaustive for very large sets
+
+    RetentionExecution:
+      type: object
+      description: B-05. A single dry-run or real run of a retention policy.
+      properties:
+        id: { type: string, format: uuid }
+        retention_policy_id: { type: string, format: uuid }
+        mode: { type: string, enum: [dry_run, real] }
+        affected_record_count: { type: integer }
+        executed_at: { type: string, format: date-time }
+        certificate:
+          description: Null for mode=dry_run; a real execution always has exactly one.
+          oneOf:
+            - { $ref: '#/components/schemas/DeletionCertificateSummary' }
+            - type: 'null'
 
     AuditLogEntry:
       type: object

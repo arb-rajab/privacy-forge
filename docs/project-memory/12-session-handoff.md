@@ -7,424 +7,468 @@
 - Current version or branch: `main` (unreleased, pre-v0.1.0)
 
 ## Session completed
-- Session number and title: **Session 21 — Admin UI stretch items: retention
-  policy management and RoPA export (mandatory), ABAC policy management UI
-  (stretch, built), audit log query view (stretch, not built — no backing
-  endpoint exists).**
-- Objective: finish the admin UI work deferred since Session 15 — retention
-  policy management and RoPA export were "Must"-priority MVP features
-  (US-010/011/012, US-013) that were API-only despite that priority; policy
-  management and audit log viewing were explicitly lower-priority/optional.
-- Status: **mandatory scope complete. One stretch item (ABAC policy
-  management UI) built. The other stretch item (audit log query view) was
-  not built, because its backing API endpoint doesn't exist at all — see
-  "New gaps found" below.** All 165 pre-existing Feature tests still pass
-  unmodified; Pint, Larastan (level 8), ESLint, and OpenAPI validation are
-  all clean. No API contract changes were made — this was a UI-consuming
-  session, not a redesign, per its own ground rules.
+- Session number and title: **Session 22 — Close B-04/B-05 (audit log
+  endpoint + retention execution history), then plan (not build) the
+  public demo instance deployment.**
+- Objective: Part A closed two small, well-scoped backend gaps found
+  while building Session 21's admin UI. Part B read the demo-instance
+  design (decided since Session 1, detailed since Session 4) and
+  produced a concrete session plan for actually deploying it, doing only
+  genuinely low-risk groundwork rather than provisioning real
+  infrastructure.
+- Status: **both Part A items closed, real and tested, wired into the
+  UI. Part B produced a concrete plan (`08-deployment-and-operations.md`,
+  now real content instead of an empty template) plus a small amount of
+  safe groundwork (see below) — no real infrastructure was touched, no
+  money was spent, and a genuine forensic finding (B-06) was surfaced
+  along the way.** All 186 Feature tests pass (165 pre-existing + 21
+  new), Pint/Larastan (level 8)/ESLint clean, OpenAPI validates.
 
-## What was built
+## Part A — B-04 and B-05
 
-### 1. Retention policy management UI (mandatory) — `resources/js/Pages/AdminRetention.vue`, route `/admin/retention`
-- Lists data categories and lets staff define a new one (name,
-  description, sensitivity, subject table) — calls the existing
-  `GET`/`POST /api/v1/admin/data-categories`.
-- Lists retention policies (active and deprecated/superseded versions
-  separately) and lets staff define a new one against an existing data
-  category — calls the existing `GET`/`POST /api/v1/admin/retention-policies`.
-- **The dry-run/real-execution distinction ADR-0002 exists for is kept
-  unambiguous in the interface itself, not just in code comments:**
-  - The only per-policy action button reads **"Preview (dry run) — no
-    changes made"** — deliberately verbose rather than a bare "Run," so
-    the no-side-effects guarantee is visible on the button itself, not
-    just inferred from a label.
-  - Its result renders in a green `role="status"` box captioned
-    **"Preview result — no records were changed"**, showing the affected
-    record count and a sample of record IDs (`RetentionPreview`'s exact
-    shape).
-  - A standing note box above both sections states explicitly that
-    **there is no "run real execution now" button anywhere on the page,
-    and that this is deliberate, not a missing feature** — see "New gaps
-    found" below for why one couldn't exist even if this session wanted
-    to add it.
-  - A third section, "Past execution history," is present but explicitly
-    says what it can't show and why, rather than faking it — see below.
-- Backed entirely by the unchanged `Admin\DataCategoryController` /
-  `Admin\RetentionPolicyController` (`retention.policy.manage`,
-  Session 11) — zero new endpoints.
+### 1. B-04: `GET /admin/audit-log` — built for real
+- **New sensitive action: `audit.log.view`** (the sixth registered ABAC
+  action). Owner or Privacy Manager may reach the endpoint at all
+  (Support Staff denied, per the roles matrix) —
+  `database/seeders/PolicyDefinitionSeeder.php`,
+  `database/factories/PolicyDefinitionFactory.php::forAuditLogView()`.
+- **Gating decision, made explicitly rather than left implicit** (per
+  this session's own brief, "decide and state which"): the roles matrix
+  names two *different* scopes for this capability — Owner "view full
+  audit log," Privacy Manager "view audit log entries related to their
+  actions." `PolicyEvaluator`'s ABAC conditions decide *whether* a
+  request is allowed at all; they do not filter *which rows* a list
+  endpoint returns — no existing sensitive action needed that before
+  now. So the row-level scope is applied in
+  `App\Http\Controllers\Admin\AuditLogController::index()` itself, after
+  the ABAC gate allows the request: an Owner's query is unfiltered; a
+  Privacy Manager's query is additionally scoped to
+  `actor_user_id = $actor->id`. This is a controller-level query
+  decision, not a new `PolicyEvaluator` condition type — see that
+  controller's class comment for the full reasoning on why stretching
+  ABAC conditions to do row-level filtering would be a real engine
+  change, out of scope by this session's own ground rules (no ADR
+  reopened).
+- Filters: `resourceType`, `resourceId` (already spec'd, Session 3),
+  `since`/`until` (new — the task brief asked for date-range filtering
+  the existing spec didn't yet have; added to `openapi.yaml` with
+  `date` validation, 422 on a malformed value).
+- `App\Http\Resources\AuditLogEntryResource` — shape matches
+  `openapi.yaml`'s existing `AuditLogEntry` schema exactly.
+- **UI**: new `resources/js/Pages/AdminAuditLog.vue` at `/admin/audit-log`
+  — filter form (resource type/id, since/until), a table of results, and
+  an explicit note that what a viewer sees depends on their role,
+  decided server-side, not filtered client-side. Linked from Welcome.vue
+  and every other admin page's nav bar.
 
-### 2. RoPA export UI (mandatory) — `resources/js/Pages/AdminRopa.vue`, route `/admin/ropa`
-- Two clearly separate, clearly labelled buttons — **"Download CSV"** and
-  **"Download PDF"** — so format choice is visible in the UI, not hidden
-  behind a single generic "Export" action or a query-string a user has to
-  already know about.
-- Calls the unchanged `GET /api/v1/admin/ropa/export?format=csv|pdf` via
-  `fetch()` + blob download (not a plain `<a href>`), so a `403`/`422`
-  from the ABAC gate or format validation renders as a real inline error
-  matching every other admin page's convention, instead of the browser
-  navigating away to raw JSON.
+### 2. B-05: retention execution history — built for real
+- **No new sensitive action** — `GET /admin/retention-policies/{id}/executions`
+  shares the existing `retention.policy.manage` gate, the same
+  "index/show/dry-run share one gate" reasoning
+  `RetentionPolicyController`'s own class comment already established.
+  New method: `RetentionPolicyController::executions()`.
+- `App\Http\Resources\RetentionExecutionResource` — `certificate` reuses
+  the existing `DeletionCertificateSummary` schema (already used by
+  `DsarStatus.deletion_certificate`) rather than inventing a second
+  certificate shape; `null` for a dry run, present for a real execution.
+- `openapi.yaml`: new path + `RetentionExecution` schema.
+- **UI**: `AdminRetention.vue`'s "Past execution history" section — an
+  honest placeholder since Session 21 — now has a real policy-picker
+  dropdown and a real table (mode, affected count, executed-at,
+  certificate summary/exceptions), calling the new endpoint.
 
-### 3. ABAC policy management UI (stretch, attempted and built) — `resources/js/Pages/AdminPolicies.vue`, route `/admin/policies`
-- Lists every registered sensitive action's current active policy
-  version (effect, and each of subject/resource/environment conditions
-  as raw JSON — these are genuinely raw ABAC condition objects, not a
-  small fixed field set a friendlier form could safely abstract) plus
-  its superseded versions in a collapsed `<details>`.
-- Editing is deliberately the highest-friction form on this page,
-  because it edits live separation-of-duties logic (e.g. ADR-0007's
-  identity-verifier-cannot-also-approve rule): **a per-policy
-  confirmation checkbox ("I understand this replaces the live
-  access-control logic for `<action_name>`") must be ticked before "Save
-  new version" is even enabled**, on top of the JSON conditions being
-  visibly what's being changed rather than hidden behind a generic
-  "edit" button.
-- Backed entirely by the unchanged `Admin\PolicyController`
-  (`policy.update`, ADR-0006) — zero new endpoints.
-- **Not exercised against a real PATCH in this session's manual
-  walkthrough** (see Validation below) — deliberately, to avoid mutating
-  the live ABAC policies backing every other sensitive action in the
-  same dev database this session's walkthrough otherwise used; the
-  underlying `PATCH /api/v1/admin/policies/{id}` endpoint itself is
-  already covered by `tests/Feature/PolicyManagementTest.php`
-  (Session 10, unchanged, re-confirmed passing this session).
+### Both items, exactly as specified in this session's own ground rules
+- Real Feature tests: `tests/Feature/AuditLogQueryTest.php` (8 tests —
+  full-vs-scoped visibility, filters, chain ordering, fail-closed),
+  `tests/Feature/RetentionExecutionHistoryTest.php` (4 tests). Both
+  actions' allow/deny cells added to
+  `tests/Feature/AuthorisationMatrixTest.php`'s exhaustive
+  (role × action) dataset — six registered sensitive actions now, not
+  five; the file's own "not applicable yet" placeholder test for audit
+  log access was removed (it moved into the real dataset, the same way
+  `retention.policy.manage` did at Session 11).
+- Pint clean (157→161 files, all clean), Larastan level 8 clean (0
+  errors, 68 files), ESLint clean, `npm run build` succeeds.
+- `openapi.yaml` updated for both (neither was previously unspecified —
+  B-04's path already existed since Session 3 and only needed the new
+  query params + the gating note; B-05's path and schema were net-new)
+  and re-validated with the real `openapi-spec-validator` tool (same
+  throwaway-container method Session 21 used): **`/spec/openapi.yaml:
+  OK`**.
 
-### 4. Audit log query view (stretch, not built)
-See "New gaps found" — `GET /admin/audit-log` has no implementation at
-all, so there is nothing for a UI to call. Not built.
+## Part B — Public demo instance: planned, and a small amount of real (safe) groundwork
 
-## New gaps found this session (real, not silently worked around)
+### What was read first, per this session's own instructions
+- `06-security-threat-model.md`'s "Demo Instance Data Safety" section in
+  full — five controls, designed Session 4, none implemented before this
+  session.
+- `08-deployment-and-operations.md` — confirmed it was the empty
+  template (matching `14-maintenance-and-retirement.md`'s state before
+  Session 19, as the brief predicted).
+- `00-project-brief.md`, `03-architecture.md`, `01-scope-and-non-goals.md`,
+  `14-maintenance-and-retirement.md` — checked directly for a decided
+  hosting target. **None exists.** "A public hosted demo instance will
+  exist" is decided (Session 1); *where* it runs never was. Stated
+  plainly in `08-deployment-and-operations.md` rather than assumed one
+  way or the other.
 
-Per this session's own ground rules ("if a genuine contract gap is
-found, report it rather than silently changing the spec"), two were
-found while scoping the mandatory retention UI and the audit-log stretch
-item — both filed to `11-backlog.md` (B-04, B-05) rather than fixed by
-adding endpoints outside this session's UI-only scope:
+### A genuine forensic finding, surfaced while checking what already exists (B-06)
+`docker/Dockerfile`'s own header comment and a Session 13 decision-log
+entry both describe "the production reference deployment (PHP-FPM + a
+real web server, built at Session 8)" as an existing artifact separate
+from the dev image. **It does not exist.** `docker/` contains only the
+dev/CI `Dockerfile` (`runtime`/`test` targets, both `CMD php artisan
+serve` — a single-threaded dev server) and `Dockerfile.frontend` (Vite
+dev server). This is the same shape of finding as ADR-0008's Laravel
+12.x forensic discovery (Session 20): a narrated claim and the
+repository's actual state directly contradict each other. Filed as
+`B-06` — a hard blocker for the demo going live on a real URL, since
+`php artisan serve` is not production-appropriate. See
+`09-decision-log.md`'s Session 22 entry for the full account.
 
-1. **No HTTP endpoint for manual/on-demand real retention execution
-   exists, or ever did.** `App\Http\Controllers\Admin\
-   RetentionPolicyController`'s own class comment and
-   `09-decision-log.md`'s Session 11 entry are explicit that this is
-   deliberate: real execution (US-012) only runs via the Laravel
-   scheduler (`ExecuteRetentionPoliciesCommand`/`retention:execute`),
-   and is intentionally *not* gated by `PolicyEvaluator` or exposed over
-   HTTP at all — "a worker executes what has already been authorised, it
-   does not re-decide" (`03-architecture.md`). This means the mandatory
-   brief's request for a UI that makes "preview, no side effects" versus
-   "execute for real" unmistakable **cannot include an actual "execute
-   for real" button**, because no such endpoint exists to call — adding
-   one would be a genuine API contract change, out of this session's
-   scope by its own ground rules. The UI instead states this plainly
-   (see AdminRetention.vue above) rather than either faking a button
-   that would 404, or silently omitting the explanation.
-2. **No read endpoint exists for past `RetentionExecution` records or
-   their `DeletionCertificate`s in general** (only `DsarStatus`'s
-   per-request `deletion_certificate` field exists, scoped to one DSAR's
-   own erasure). The mandatory brief asked the retention UI to "show
-   past execution history... and their deletion certificates" — checked
-   `docs/architecture/openapi.yaml` in full and confirmed no such path
-   exists. Filed as `B-05`.
-3. **`GET /admin/audit-log` is fully documented in `openapi.yaml` (the
-   "Admin — RoPA and Audit" tag) but was never implemented** — no route,
-   no controller, nothing. Found while scoping the audit-log query view
-   stretch item; this is why that item wasn't attempted at all, not a
-   time/priority decision. `openapi-spec-validator` (run this session,
-   confirmed still passing) only validates the spec's own internal
-   consistency, so a documented-but-unbuilt path doesn't fail validation
-   — this drift went uncaught by the same tooling that would catch a
-   malformed spec. Filed as `B-04`.
+### Groundwork actually built this session (real code, real tests, zero real infrastructure touched)
+1. **`config/demo.php`** — `DEMO_MODE`/`DEMO_RESET_SCHEDULE` have existed
+   in `.env.example` since Session 4 with **zero code anywhere reading
+   either value**. This is the first code that does.
+2. **The warning banner (control 4).** `HandleInertiaRequests::share()`
+   now exposes `demoMode` globally; `Welcome.vue` renders the banner
+   when it's true. Tested (`tests/Feature/DemoModeSharedPropTest.php`).
+3. **`php artisan demo:reset`** (control 1 — scheduled reset,
+   `App\Console\Commands\ResetDemoInstanceCommand`). Truncates every
+   subject/activity table in one statement (Postgres requires this —
+   see the command's own comment on why per-table truncation across
+   mutually-referencing tables fails) and re-seeds the standard
+   fresh-install baseline. **Refuses to run unless
+   `config('demo.enabled')` is true** — routes/console.php registers its
+   scheduler entry unconditionally, so this refusal is what keeps a real
+   self-hosted instance safe from ever having this entry do anything.
+   Tested (`tests/Feature/ResetDemoInstanceCommandTest.php`, 3 tests —
+   including that it's a genuine no-op when disabled, and that the
+   audit chain sequence restarts at genesis after a real reset).
+4. **`routes/console.php`** schedules `demo:reset` via the configurable
+   cron expression, inert on any non-demo instance.
+5. **Control 3 (connector registration disabled) needed no code change**
+   — already structurally satisfied by Session 10's unrelated decision
+   that connector management is CLI-only with exactly one registration
+   command (the reference/stub connector). Recorded in
+   `09-decision-log.md` so a future session doesn't rebuild something
+   that already exists for a different reason.
 
-None of these three are this session's fault or a regression — all
-predate Session 21 (the ungated-scheduler decision is Session 11's; the
-missing audit-log controller has apparently never existed). They were
-simply never noticed until a session tried to build UI against them.
+### What was deliberately NOT built, and why (both real open design questions, not oversights)
+1. **Control 2 — no persistent shared admin credential / a scoped
+   per-visitor demo identity.** `demo:reset` leaves `users` untouched
+   specifically because no such mechanism exists yet — truncating it
+   today would lock out every visitor with nothing to replace it.
+   Designing this (how a visitor gets a session without a real login or
+   a long-lived shared credential) is real security design work, filed
+   as `B-08`, not attempted this session.
+2. **Richer synthetic demo content.** `demo:reset` resets to the
+   existing minimal baseline (six ABAC policies + the reference
+   connector), not a populated, explorable demo dataset. Filed as `B-07`
+   — a content/product decision, not groundwork.
+3. **Control 5 (isolation, spend cap, scoped credentials) and TLS.**
+   Purely infrastructure, blocked on the undecided hosting target — not
+   attempted, per this session's explicit "planning only" scope for
+   anything touching real infrastructure or money.
+4. **No real infrastructure was provisioned. No cloud account was
+   touched. No money was spent.** Every piece of Part B's code above was
+   validated only against this session's local dev/CI containers.
+
+### The plan itself
+`docs/project-memory/08-deployment-and-operations.md` now has real
+content in every section instead of empty headers, plus a dedicated "The
+actual deployment session(s)" section: a hosting recommendation (a
+single small VPS running `docker compose` directly, with reasoning and
+an explicit counter-consideration), the concrete go/no-go checklist for
+a real public URL, and a three-session breakdown (A: production image +
+infra provisioning; B: demo-safety verification + DNS/TLS; C: go-live
+checklist + the B-07 content decision), each with an independently
+checkable exit criterion.
 
 ## MVP boundary checklist — honest current count
 
-**The task brief for this session stated the count "was 7/9 after
-Session 15" — checked `01-scope-and-non-goals.md` directly rather than
-trusting that figure, and it does not match**: as of Session 17 (R-04,
-the audit-log anchor), that file already recorded **8 of 9 items
-complete**, and it explicitly says so in its own text (`01-scope-and-
-non-goals.md` line 9-13). The one figure this session can confirm
-firsthand: **still 8 of 9, unchanged by this session's work**, because
-the retention (item 3) and RoPA (item 4) checklist entries were already
-checked off *before* this session, on the grounds that **their own
-literal wording never promised a UI** — item 3 asks for "per-data-category
-rules, dry-run preview, scheduled execution, deletion certificates" (a
-mechanism, which existed and was tested end-to-end since Sessions 11-12);
-item 4 asks for "a RoPA register with export" (which existed since
-Session 12), explicitly contrasted in the same file against "a richer
-admin dashboard for RoPA visualisation," named as deferred-to-backlog,
-not MVP-required. **This session's UI work is therefore a real quality
-and completeness improvement — closing the gap between "the mechanism
-exists" and "a staff member can actually drive it without a DevTools
-console" — but it does not move the checklist count**, because the
-checklist was never blocked on this in the first place. The one
-remaining unchecked item is unrelated to this session: **a public demo
-instance** (isolated infrastructure, spend cap, scheduled reset) —
-nothing this session touched.
+**Unchanged at 8 of 9, exactly as Session 21 left it — this session's
+work does not move the checklist**, because the checklist's own ninth
+item asks for "a public demo instance running on synthetic seed data, in
+isolated infrastructure, with a spend cap" (`01-scope-and-non-goals.md`)
+— an actually-deployed instance, not a plan for one plus some
+groundwork. **What has changed is the *shape* of what's left**: it is no
+longer a vague "public demo instance" line item — it is now the
+three-session plan above, with a named hosting decision to make, a named
+hard blocker (`B-06`, no production image exists), and two named open
+design questions (`B-07` content, `B-08` visitor identity) that must be
+resolved before it. The next session has a checklist, not a restart.
 
-**Is "credible v1" per that file's own Definition of "v1 complete" met
-now?** No, for the same reason it wasn't before this session: condition
-1 requires *every* box checked, and the demo-instance box is still
-unchecked; conditions 2-4 (success metrics verified by a third party,
-the Gate 9→10 checklist, and the non-goals table check) were not this
-session's scope and are unchanged. This session did not change that
-answer — it was never going to, since retention/RoPA UI wasn't one of
-the checklist's blocking conditions.
+**Is "credible v1" per that file's Definition of "v1 complete" met now?**
+No, unchanged from Session 21 — condition 1 requires every box checked,
+and the demo-instance box is still unchecked. This session did not
+change that answer and was never going to; Part B was explicitly
+planning, not execution.
 
 ## Files created or changed
 
-**New:**
-- `resources/js/Pages/AdminRetention.vue`
-- `resources/js/Pages/AdminRopa.vue`
-- `resources/js/Pages/AdminPolicies.vue` (stretch)
+**New (Part A):**
+- `app/Http/Controllers/Admin/AuditLogController.php`
+- `app/Http/Resources/AuditLogEntryResource.php`
+- `app/Http/Resources/RetentionExecutionResource.php`
+- `resources/js/Pages/AdminAuditLog.vue`
+- `tests/Feature/AuditLogQueryTest.php`
+- `tests/Feature/RetentionExecutionHistoryTest.php`
+
+**New (Part B groundwork):**
+- `config/demo.php`
+- `app/Console/Commands/ResetDemoInstanceCommand.php`
+- `tests/Feature/ResetDemoInstanceCommandTest.php`
+- `tests/Feature/DemoModeSharedPropTest.php`
 
 **Changed:**
-- `routes/web.php` — three new `Inertia::render()` GET routes under
-  `auth` middleware: `/admin/retention`, `/admin/ropa`, `/admin/policies`.
-  No `routes/api.php` changes — every JSON endpoint these pages call
-  already existed.
-- `resources/js/Pages/Welcome.vue` — three new nav links alongside the
-  existing DSAR queue link, all gated the same way (`v-if="page.props.
-  auth.user"`).
-- `docs/project-memory/11-backlog.md` — two new entries, `B-04` and
-  `B-05` (see "New gaps found" above).
+- `app/Http/Controllers/Admin/RetentionPolicyController.php` — new
+  `executions()` method, sharing the existing gate.
+- `routes/api.php` — two new GET routes (`/audit-log`,
+  `/retention-policies/{id}/executions`), both under the existing
+  `['web','auth']` admin group.
+- `routes/console.php` — `demo:reset` scheduled via
+  `config('demo.reset_schedule')`.
+- `database/seeders/PolicyDefinitionSeeder.php`,
+  `database/factories/PolicyDefinitionFactory.php` — `audit.log.view`
+  added.
+- `app/Http/Middleware/HandleInertiaRequests.php` — `demoMode` shared
+  prop.
+- `resources/js/Pages/Welcome.vue` — demo warning banner + audit-log nav
+  link.
+- `resources/js/Pages/AdminRetention.vue` — real execution history
+  section, replacing the honest placeholder.
+- `resources/js/Pages/AdminRopa.vue`, `AdminPolicies.vue` — audit-log nav
+  link added for consistency.
+- `tests/Feature/AuthorisationMatrixTest.php` — `audit.log.view` added
+  to the exhaustive matrix; the stale "not applicable yet" test removed.
+- `docs/architecture/openapi.yaml` — `/admin/audit-log`'s query params
+  and gating note; new `/admin/retention-policies/{id}/executions` path
+  and `RetentionExecution` schema.
+- `docs/project-memory/06-security-threat-model.md` — an "Implementation
+  status (Session 22)" table added under Demo Instance Data Safety (the
+  controls themselves are unchanged; this only records what code exists
+  today).
+- `docs/project-memory/08-deployment-and-operations.md` — full rewrite
+  from the empty template (this session's main Part B deliverable).
+- `docs/project-memory/09-decision-log.md` — two new entries (the B-06
+  forensic finding; the DEMO_MODE/`demo:reset` groundwork decisions).
+- `docs/project-memory/11-backlog.md` — three new entries (`B-06`,
+  `B-07`, `B-08`).
 - `docs/project-memory/12-session-handoff.md` (this file).
 
-**Not changed:** `docs/architecture/openapi.yaml` (confirmed still
-validates, unchanged — no contract changes made or needed for the
-mandatory scope), any ADR, any PHP controller/service/model, any
-migration, `composer.json`/`composer.lock`, `package.json`.
+**Not changed:** any ADR (ADR-0001 through ADR-0008 — none reopened, per
+this session's ground rules), `01-scope-and-non-goals.md`'s GDPR-only/
+single-tenant/public-demo decisions (read, not reopened),
+`composer.json`/`composer.lock`/`package.json` (no new dependencies).
 
 ## Validation performed
 
-- **`composer test` (Pest, inside `privacy-forge-app-1`) → 165/165
-  passed, 664 assertions, 106.28s** — re-run fresh this session against
-  the unmodified backend, confirming the retention/RoPA/policy endpoints
-  this session's UI calls still behave exactly as tested (not assumed
-  from the fact that the controllers predate this session).
-- **`composer lint` (Pint) → clean, 152 files.**
-- **`composer analyse` (Larastan, level 8) → 0 errors.**
-- **`npm run lint` (ESLint, inside `privacy-forge-frontend-1`) →
-  clean**, including the three new `.vue` files.
-- **`docs/architecture/openapi.yaml` → valid**, checked with the actual
-  `openapi-spec-validator` tool via a throwaway `python:3.12-slim`
-  container, matching CI's own method — confirms no accidental contract
-  drift from this session's routing/UI work.
-- **Manual walkthrough of the real UI, over real HTTP, against the
-  actual running docker-compose stack** — the same substitute pattern
-  R-08 already established, because the Playwright/Pest browser suite
-  remains an accepted residual risk this session deliberately did not
-  re-attempt fixing:
-  1. Seeded a genuinely fresh dev database (`php artisan db:seed` for
-     the five ABAC policies; `php artisan privacy-forge:create-owner`
-     for a real Owner account — the dev database had zero users/rows of
-     any kind at session start).
-  2. Logged in for real via `POST /login` (not `actingAs()`), capturing
-     the real session cookie and the real per-request CSRF token from
-     the rendered Inertia page's `data-page` JSON — exactly what each
-     new Vue page's own `fetch()` calls do.
-  3. `GET /admin/retention` → `200`, Inertia page renders as
-     `AdminRetention` with the real logged-in Owner in `auth.user`.
-  4. `POST /api/v1/admin/data-categories` (mirrors the "Add data
-     category" button) → `201`, real row created.
-  5. `POST /api/v1/admin/retention-policies` (mirrors "Add retention
-     policy") → `201`, real row created against that category.
-  6. Created a real, retention-eligible `ConsentRecord` (withdrawn 60
-     days ago) via the factory, then `POST .../retention-policies/{id}/
-     dry-run` (mirrors "Preview (dry run)") → `200`, returned
-     `affected_record_count: 1` with the real record's ID as the sample
-     — then re-queried that record directly and confirmed its `status`
-     was still `withdrawn` (unchanged), proving the preview button truly
-     made no changes, the same assertion `RetentionDryRunParityTest`
-     makes in-process.
-  7. `GET /admin/ropa` → `200`, Inertia page renders as `AdminRopa`.
-  8. `GET /api/v1/admin/ropa/export?format=csv` (mirrors "Download CSV")
-     → `200`, `Content-Type: text/csv`, `Content-Disposition: attachment;
-     filename="ropa-export.csv"`, real CSV body including the purpose/
-     category/policy just created.
-  9. `GET /api/v1/admin/ropa/export?format=pdf` (mirrors "Download PDF")
-     → `200`, `Content-Type: application/pdf`, confirmed via `file` as a
-     real 3-page PDF document, not a stub.
-  10. `GET /admin/policies` → `200`, Inertia page renders as
-      `AdminPolicies`; `GET /api/v1/admin/policies` → `200`, returned all
-      five real seeded policy definitions with their actual conditions —
-      confirming the page has real data to render. The `PATCH` (Save)
-      path was deliberately not fired against these live policies (see
-      "What was built," item 3) — it remains covered only by the
-      pre-existing `PolicyManagementTest.php`, re-confirmed passing in
-      the full suite run above, not by this session's own manual click.
-  **Stated plainly, matching R-08's own language, not glossed over:**
-  this walkthrough proves the exact backend contract each new button
-  calls, over real HTTP, with a real session and a real CSRF token, the
-  same way Session 17's DSAR walkthrough did. **It does not prove a
-  real mouse click in a real rendered browser fires these `fetch()`
-  calls** — that would need the same Playwright-driven browser test
-  suite that hangs (R-08, accepted residual risk, not re-attempted this
-  session). The gap is the same shape as every other admin-dashboard
-  page since Session 14 and is not being claimed as closed here.
-  Screenshots were not additionally captured, since no browser was
-  actually driven to render a screen — only the underlying HTTP contract
-  was exercised.
+- **`composer test` (Pest) → 186/186 passed, 750 assertions, 87.9s** —
+  run repeatedly through this session as work progressed, not just once
+  at the end.
+- **`composer lint` (Pint) → clean, 161 files.**
+- **`composer analyse` (Larastan, level 8) → 0 errors, 68 files.**
+- **`npm run lint` (ESLint) → clean.**
+- **`npm run build` → succeeds** (both the main app bundle and the
+  standalone widget build).
+- **`docs/architecture/openapi.yaml` → valid**, checked with the real
+  `openapi-spec-validator` tool via the same throwaway
+  `python:3.12-slim`-container method Session 21 used.
+- **Manual walkthrough of B-04/B-05 over real HTTP, against the actual
+  running docker-compose stack** — the same substitute pattern R-08
+  established and Session 21 followed:
+  1. Seeded a fresh dev database (`db:seed`, `privacy-forge:create-owner`
+     for a real Owner) and logged in for real via `POST /login` (real
+     session cookie, real per-request CSRF token from the rendered
+     Inertia page — not `actingAs()`).
+  2. `GET /admin/audit-log` → `200`, Inertia page renders as
+     `AdminAuditLog`. `GET /api/v1/admin/audit-log` → `200`, returned
+     this very request's own `audit.log.view` allow entry — proving the
+     endpoint, the gate, and the audit trail it writes to are all real,
+     not mocked.
+  3. Created a real data category and retention policy, ran a real
+     dry-run (`POST .../dry-run` → `200`, `affected_record_count: 0`),
+     then `GET .../executions` → `200`, returned that exact execution
+     row with `mode: dry_run`, `certificate: null` — proving B-05's
+     endpoint reflects real `RetentionExecution` rows, not fixture data.
+  4. Created a real Privacy Manager and a real Support Staff account.
+     Logged in as the Privacy Manager: `GET /api/v1/admin/audit-log` →
+     `200`, returned **only** that manager's own `audit.log.view` entry
+     — not the Owner's earlier category/policy/dry-run actions already
+     in the same log — directly proving the row-level scoping decision
+     documented above, over real HTTP, not just in a Pest test. Logged
+     in as Support Staff: both `GET /api/v1/admin/audit-log` and
+     `GET .../executions` → real `403`s with the correct `policy_id`.
+  5. Exercised `demo:reset` for real via CLI: `DEMO_MODE=true php
+     artisan demo:reset` → succeeds, re-seeds six policies and one
+     connector; the same command with `DEMO_MODE` unset → refuses,
+     exit code 1, touches nothing. (The dev database was independently
+     wiped between these two steps by an intervening `composer test`
+     run — this project's `phpunit.xml.dist` deliberately points tests
+     at the same Postgres connection as dev, and `RefreshDatabase` runs
+     `migrate:fresh` on its first test — not a bug in `demo:reset`
+     itself; the isolated Pest tests in
+     `ResetDemoInstanceCommandTest.php` are the rigorous evidence for
+     its behaviour, this CLI run is the "it really executes for real"
+     confirmation.) The dev environment was restored to a working state
+     (migrated, seeded, reference connector registered, a fresh Owner
+     account created) before ending the session, so it isn't left broken
+     for whoever opens this repository next.
+  **Stated plainly, matching R-08's own language:** this walkthrough
+  proves the exact backend contract every new button/endpoint exposes,
+  over real HTTP/CLI, with real sessions and real data. It does not
+  prove a real mouse click in a real rendered browser fires the new
+  `AdminAuditLog.vue`/`AdminRetention.vue` history section's `fetch()`
+  calls — that gap is the same accepted shape as every other
+  admin-dashboard page since Session 14 (R-08), not newly introduced or
+  newly claimed closed here.
 
 ## What was explicitly NOT done this session, and why
 
-1. **Audit log query view (stretch item 4) — not attempted at all**,
-   because `GET /admin/audit-log` has no backend implementation to build
-   a UI against (see "New gaps found," `B-04`). Building a fake page
-   against a non-existent endpoint, or quietly adding the missing
-   controller/route to make the stretch item possible, were both judged
-   out of this session's UI-only scope — reported instead.
-2. **Past retention execution history and deletion certificates are not
-   shown on the retention page**, because no read endpoint exists for
-   them either (`B-05`). The page states this explicitly rather than
-   omitting the promised section silently or fabricating placeholder
-   data.
-3. **No manual "run real execution now" button exists anywhere**,
-   because no HTTP endpoint for it exists, by a Session 11 architectural
-   decision this session did not reopen (see "New gaps found," item 1).
-4. **The ABAC policy edit form (`AdminPolicies.vue`) was not exercised
-   with a real `PATCH` in this session's manual walkthrough**, to avoid
-   mutating the same five live sensitive-action policies every other
-   admin page in the dev database depends on — see "Validation
-   performed," item 10.
-5. **No ADR reopened** (including ADR-0002, ADR-0006, ADR-0007, and
-   ADR-0008 from Session 20). **No API contract changes** —
-   `docs/architecture/openapi.yaml` is byte-for-byte unchanged from the
-   start of this session, confirmed valid.
-6. **R-01 through R-08 were not touched**, and none were affected as a
-   side effect — this session's only backend interaction was reading
-   existing controllers/routes and calling existing endpoints over real
-   HTTP for the manual walkthrough; no application code changed.
-7. **B-01, B-02, B-03 (prior sessions' backlog items) were not picked
-   up** — out of this session's UI-only scope; still open, unchanged.
+1. **No real infrastructure provisioned, no cloud account touched, no
+   money spent** — Part B's explicit scope was planning plus
+   low-risk-only groundwork; both boundaries were respected throughout.
+2. **`B-06`'s real production image was not built** — found, filed, and
+   named as a hard blocker in the deployment plan, not fixed this
+   session (it's real, non-trivial feature work, exactly the kind Part B
+   was scoped to plan around, not rush into the same session as Part A).
+3. **`B-07` (demo content) and `B-08` (visitor identity) were not
+   designed, only named** — both are genuine open design questions this
+   session judged as needing their own real design pass, not a rushed
+   implementation bolted onto Part B's groundwork.
+4. **No ADR reopened.** GDPR-only, single-tenant, and the public-demo
+   decision itself were read, not re-decided, per this session's own
+   ground rules.
+5. **`docker/Dockerfile`'s misleading "built at Session 8" comment was
+   left as-is**, deliberately — see `09-decision-log.md`'s B-06 entry:
+   fixing just the comment without building the real image it describes
+   would misrepresent progress; the session that builds `B-06` should
+   correct it alongside the real fix.
+6. **B-01, B-02, B-03 (prior sessions' backlog items) were not picked
+   up** — out of this session's scope; still open, unchanged.
 
 ## Open questions and risks
 
-- **R-01 — unchanged, still open** (audit log DB-grant revocation).
-- **R-02, R-04, R-05, R-06 — unchanged, still closed.**
-- **R-07 — still closed (Session 18); rate-limit follow-up not
-  re-checked this session** (this session's brief was UI work, not the
-  Dockerfile timing question — the dated trigger in `10-risk-register.md`
-  still applies: treat the `curl` rate-limit check as stale if not
-  re-run on or after 2026-08-24).
-- **R-08 — still accepted as a residual risk, unchanged, not
-  re-attempted** — this session's manual walkthrough follows the exact
-  same substitute pattern the risk register already establishes, adding
-  three new pages' worth of confirmed backend-contract coverage to it
-  without claiming to have closed the underlying gap.
-- **B-01, B-02, B-03 — unchanged, still open** (full-instance archival
-  export; duplicate-active-retention-policy validation gap; CI's missing
-  scheduled re-scan trigger).
-- **B-04 (new) — `GET /admin/audit-log` documented but never
-  implemented.** Blocks any future audit-log UI.
-- **B-05 (new) — no read endpoint for retention execution/deletion
-  certificate history.** Blocks fully satisfying this session's own
-  retention UI brief.
-- **MVP boundary — still 8 of 9, unchanged by this session** (see
-  dedicated section above). The one remaining item (public demo
-  instance) is unrelated to admin UI work.
+- **R-01 through R-08 — not touched, none affected as a side effect.**
+  This session's only backend interaction beyond Parts A/B's own new
+  code was reading existing controllers/config and calling
+  existing/new endpoints over real HTTP/CLI for validation; no
+  unrelated application code changed. Specifically:
+  - **R-07's rate-limit follow-up trigger (2026-08-24) is not yet
+    due** — today is 2026-08-18 — so per `10-risk-register.md`'s own
+    dated instruction, no re-check was performed this session. The next
+    session that touches this repository on or after 2026-08-24 should
+    run it.
+  - **R-08 — unchanged, still accepted residual risk.** This session's
+    manual walkthrough follows the exact same curl/CLI substitute
+    pattern the risk register already accepts, adding B-04/B-05/demo:reset
+    coverage to it without claiming to have closed the underlying
+    browser-automation gap.
+- **B-01, B-02, B-03 — unchanged, still open.**
+- **B-04, B-05 — closed this session.**
+- **B-06 (new) — no production-grade application image exists**,
+  despite a comment claiming otherwise. Hard blocker for the demo going
+  live; first item in the recommended Session A above.
+- **B-07 (new) — demo synthetic content is undesigned** beyond the
+  minimal ABAC/connector baseline. Needed for a *compelling* demo, not a
+  safe one.
+- **B-08 (new) — no scoped per-visitor demo identity mechanism is
+  designed.** A real open security-design question, not a detail;
+  needed for anyone to actually log in to the demo without either a
+  shared credential (the exact thing control 2 exists to avoid) or no
+  staff-side demo at all.
+- **MVP boundary — still 8 of 9**, unchanged by this session (see
+  dedicated section above) — the shape of the ninth item is now concrete
+  (three planned sessions, a named blocker, two named design questions),
+  not vague.
 
 ## Next recommended session
 
-1. **`B-04`** — implement `Admin\AuditLogController` (`GET /admin/
-   audit-log`, matching the existing `openapi.yaml` shape exactly:
-   `resourceType`/`resourceId` query filters, `AuditLogEntry`-shaped
-   response array) — this both closes a real spec/implementation gap on
-   its own merits and unblocks a real audit-log query view UI as a
-   natural follow-up.
-2. **`B-05`** — a read endpoint for retention execution history (e.g.
-   `GET /admin/retention-policies/{id}/executions`), so `AdminRetention.vue`'s
-   "Past execution history" section (currently an honest placeholder)
-   can show real data instead. Would need its own `openapi.yaml` entry
-   and schema (`RetentionExecution`/`DeletionCertificateSummary`-shaped)
-   — a genuine, scoped API contract addition, not a silent one.
-3. **`B-01`** — the full-instance archival export, if a session wants
-   substantial new feature work instead.
-4. **R-01** — audit-log DB-grant revocation, the one remaining
-   genuinely open risk.
+**Single objective: Session A of the three-session plan in
+`08-deployment-and-operations.md` — build the real production image
+(`B-06`) and provision the actual hosting infrastructure**, confirming
+or overriding this session's VPS-with-`docker-compose` recommendation
+first. Exit criterion stated in the plan: the app responds to `GET /up`
+over real infrastructure's public IP (no DNS/TLS yet — that's Session B).
 
-- Inputs required: this file, `docs/project-memory/09-decision-log.md`
-  (Session 11's ungated-scheduler entry), `docs/project-memory/
-  11-backlog.md` (B-01 through B-05), `docs/architecture/openapi.yaml`,
-  `docs/adr/ADR-0002-retention-dry-run-parity.md`.
+Do NOT attempt Session B or C's scope in the same session as Session A,
+for the same reason this session didn't rush Part A and Part B together
+— infra provisioning and demo-safety verification are different failure
+modes that deserve to be checked independently.
+
+- Inputs required: `docs/project-memory/08-deployment-and-operations.md`
+  (this session's plan, read in full — not just the checklist), `docs/
+  project-memory/09-decision-log.md`'s two Session 22 entries (the B-06
+  forensic finding; the DEMO_MODE/`demo:reset` reasoning),
+  `docs/project-memory/11-backlog.md` (B-06/B-07/B-08),
+  `docker/Dockerfile` (what exists today, to build the real image from,
+  not replace wholesale), `config/demo.php` and
+  `app/Console/Commands/ResetDemoInstanceCommand.php` (what already
+  exists and just needs to actually run somewhere real).
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 21
+**Repository state:** branch `main`, unreleased (pre-v0.1.0), Session 22
 complete.
 
 **Current stack:** unchanged — no dependency versions touched this
-session (Laravel `^12.61.1`/`v12.66.0` per ADR-0008, unchanged). PHP 8.3,
-Vue 3/Inertia, PostgreSQL 16, Redis 7, S3-compatible storage,
-`barryvdh/laravel-dompdf`, `pestphp/pest-plugin-browser`. No new
-dependencies this session.
+session. PHP 8.3, Vue 3/Inertia, PostgreSQL 16, Redis 7, S3-compatible
+storage. No new dependencies.
 
 **Architecture decisions that must not be reversed:** all decisions from
-Sessions 0-20 remain in force, including ADR-0008 (Laravel 12.x,
-retroactive) — nothing about the stack was touched this session. The
-Session 11 decision that scheduled retention execution is deliberately
-ungated and not exposed over HTTP (`09-decision-log.md`) was *read and
-respected*, not reopened — this session's UI reflects that boundary
-rather than working around it.
+Sessions 0-21 remain in force. Nothing about the stack, any ADR, or the
+GDPR-only/single-tenant/public-demo decisions was touched this session.
 
 **Implementation state:**
-- Done: everything from Session 20, plus: a real retention policy
-  management UI (`/admin/retention`) with an unambiguous dry-run-only
-  action and an honest note about why there's no real-execution button;
-  a real RoPA export UI (`/admin/ropa`) with visible CSV/PDF format
-  choice; a real ABAC policy management UI (`/admin/policies`, stretch)
-  with a per-policy confirmation gate before any save. All three call
-  only pre-existing endpoints. Full test suite/Pint/Larastan/ESLint/
-  OpenAPI all re-confirmed clean. A real manual HTTP walkthrough of every
-  new button's backend contract, against a freshly seeded dev database.
+- Done: everything from Session 21, plus: `GET /admin/audit-log` (real
+  endpoint, real UI, real role-scoped visibility), `GET
+  /admin/retention-policies/{id}/executions` (real endpoint, real UI);
+  `DEMO_MODE`/`demo:reset`/the warning banner all wired for the first
+  time (code exists, never run against a real deployment); a concrete,
+  three-session deployment plan with a hosting recommendation.
 - In progress: nothing mid-flight.
-- **Known gaps to check first:** (1) `B-04` — `GET /admin/audit-log` is
-  documented but has zero implementation (new this session's finding);
-  (2) `B-05` — no read endpoint for retention execution/deletion
-  certificate history (new this session's finding); (3) R-01 — DB-level
-  grant revocation for the audit log unbuilt; (4) R-07's rate-limit
-  follow-up — re-check the dated trigger in `10-risk-register.md`
-  (2026-08-24 if still blocked before then); (5) R-08 — accepted as
-  residual, unchanged; (6) `B-01`/`B-02`/`B-03` — unchanged, still open;
-  (7) audit log query view (the fourth stretch item this session
-  scoped) has no UI, blocked entirely on `B-04`.
-- Not started: unchanged from Session 20 (a registry-hosted prebuilt
-  image for R-07, a fix for R-08's underlying hang, connector secret
-  rotation, HTTP connector-management, email/notification delivery,
-  password reset, `B-01`/`B-02`/`B-03`, the public demo instance's
-  isolated infrastructure/spend cap/scheduled reset, and now `B-04`/
-  `B-05` from this session).
+- **Known gaps to check first:** (1) `B-06` — no production-grade
+  application image exists, despite a stale comment claiming otherwise
+  — the actual hard blocker for going live; (2) `B-07` — demo content
+  undesigned; (3) `B-08` — demo visitor identity undesigned; (4) R-01 —
+  still open, DB-level grant revocation for the audit log unbuilt; (5)
+  R-07's rate-limit follow-up — re-check due 2026-08-24, not before;
+  (6) R-08 — accepted residual, unchanged; (7) B-01/B-02/B-03 —
+  unchanged, still open.
+- Not started: unchanged from Session 21's list, plus now B-06/B-07/B-08,
+  plus real infra provisioning, TLS, and a verified spend cap for the
+  demo instance.
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the
 2-new-technology cap (ABAC, ASVS L2) — this session introduced no new
-architectural pattern or dependency; the three new Vue pages match the
-existing Inertia/plain-`fetch()` house style exactly.
+architectural pattern or dependency.
 
-**Task for next session (single objective):** pick up `B-04` (implement
-the missing `Admin\AuditLogController`) — it's small, closes a real
-spec/implementation drift on its own merits independent of any UI work,
-and directly unblocks the one stretch item this session couldn't attempt
-at all.
+**Task for next session (single objective):** Session A of the
+deployment plan — build the real production image (`B-06`) and get it
+running on real (or overridden-recommendation) infrastructure, reachable
+by IP. Do not attempt DNS/TLS/demo-safety-verification (Session B) or
+the go-live checklist (Session C) in the same session.
 
 **Files to attach or paste:**
 - `docs/project-memory/12-session-handoff.md` (this file)
-- `docs/project-memory/11-backlog.md` (B-04, B-05 new this session)
-- `docs/project-memory/09-decision-log.md` (Session 11's ungated-scheduler
-  entry, for context on why there's no real-execution HTTP endpoint)
-- `docs/architecture/openapi.yaml` (the "Admin — RoPA and Audit" tag, to
-  see `GET /admin/audit-log`'s already-documented shape)
+- `docs/project-memory/08-deployment-and-operations.md` (the plan itself
+  — read the "actual deployment session(s)" section in full)
+- `docs/project-memory/09-decision-log.md`'s two Session 22 entries
+- `docs/project-memory/11-backlog.md` (B-06, B-07, B-08 new this session)
+- `docker/Dockerfile` (the existing dev/CI image to build the real one
+  alongside, not replace)
 
 **Ground rules:** Do not change the stack. Do not reopen any ADR
-(ADR-0001 through ADR-0008). Do not add a manual "run real execution
-now" HTTP endpoint without a real ADR discussion — Session 11's
-ungated-scheduler decision was deliberate and is still in force. R-01
-remains open; R-02/R-04/R-05/R-06/R-07 are closed; R-08 is accepted
-residual — don't reopen any of them without a genuine new finding.
-`B-04`/`B-05` are new findings from this session, not yet fixed —
-picking either up is real, scoped feature work with its own OpenAPI
-additions, not a "just wire up what already exists" task.
+(ADR-0001 through ADR-0008). Do not reopen GDPR-only/single-tenant/
+public-demo — those are decided; Session A is about executing what was
+already decided (the demo instance will exist somewhere), not
+re-deciding whether it should. Do not spend real money or provision real
+infrastructure without confirming the hosting choice first — this
+session's VPS recommendation is a starting point, not a mandate. R-01
+remains open; R-07's follow-up isn't due until 2026-08-24; R-08 is
+accepted residual — don't reopen any of them without a genuine new
+finding.

@@ -51,6 +51,11 @@ class HandleInertiaRequests extends Middleware
             // Inertia's own axios instance, which would attach the
             // equivalent XSRF-TOKEN cookie header automatically.
             'csrfToken' => csrf_token(),
+            // Demo Instance Data Safety, control 4 (06-security-threat-
+            // model.md): a visible warning banner. Shared globally, not
+            // per-page, so a future page never has to remember to check
+            // this itself — see Welcome.vue for the banner this drives.
+            'demoMode' => config('demo.enabled'),
         ];
     }
 }

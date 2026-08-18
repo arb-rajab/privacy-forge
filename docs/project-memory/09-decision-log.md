@@ -1,7 +1,7 @@
 # Decision Log
 > Purpose: why things are the way they are, so decisions are not silently undone.
 > Project: privacy-forge (public)
-> Last updated: 2026-08-18 (Session 20)
+> Last updated: 2026-08-18 (Session 22)
 
 Full reasoning for each ADR lives in `docs/adr/`. This log is the
 short-form index — read it first, open the linked ADR for the trade-off
@@ -501,3 +501,107 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   success-metric's wording so it asks a question this project can actually
   answer, following the same "correction, not a new architecture
   decision" pattern as the Owner-row fix at Session 10.
+
+## Forensic finding: "Session 8's hardened production image" does not exist (Session 22, 2026-08-18)
+
+- **Finding.** `docker/Dockerfile`'s own header comment and a
+  `09-decision-log.md` Session 13 entry (widget build, above) both refer
+  to "the production reference deployment (PHP-FPM + a real web server,
+  built at Session 8)" as an established, separate artifact from the dev
+  `runtime`/`test` targets. It does not exist: `docker/` contains exactly
+  `Dockerfile` (the `deps`/`runtime`/`test-deps`/`test` multi-stage build
+  covered by R-07, whose `runtime`/`test` targets both `CMD php artisan
+  serve` — Laravel's own docs are explicit this is "not intended for
+  production") and `Dockerfile.frontend` (the Vite dev server). No
+  PHP-FPM image, no web-server config (nginx/Caddy/Apache), and no
+  `docker-compose.prod.yml` or equivalent exist anywhere in the
+  repository. This is the same shape of finding as ADR-0008's Laravel
+  12.x forensic discovery (Session 20) — a narrated claim and the
+  repository's actual state directly contradicting each other, caught
+  only because a session that actually needed the artifact went looking
+  for it rather than trusting the comment.
+- **Why this matters now, specifically.** Part B of this session (public
+  demo instance planning, `12-session-handoff.md`) needs to state
+  plainly what exists before a real public URL can go live. `php artisan
+  serve` is a single-threaded development server; running the actual
+  public demo on it would be both a performance and a credibility
+  problem for a security-focused portfolio piece. This is now filed as
+  `B-06` (`11-backlog.md`) — real, scoped feature work for the dedicated
+  infra/hosting session Part B's plan lays out, not something this
+  session builds, per Part B's own "planning and scoping only" ground
+  rule.
+- **Not an ADR, not a reversal of anything.** No ADR ever committed to a
+  specific production image design — this is a documentation-vs-reality
+  correction, logged here per the same judgement call the Owner-row fix
+  (Session 10) and ADR-0008's forensic write-up (Session 20) both used.
+  `docker/Dockerfile`'s header comment should be corrected the session
+  that actually builds the real production image (`B-06`), not silently
+  edited here without also fixing the gap it describes.
+
+## Demo Instance Data Safety: DEMO_MODE wired, `demo:reset` built — groundwork only, not deployed (Session 22, 2026-08-18)
+
+- **Finding.** `DEMO_MODE`/`DEMO_RESET_SCHEDULE` have existed in
+  `.env.example` since Session 4 (`06-security-threat-model.md`'s "Demo
+  Instance Data Safety" section) with **zero code anywhere reading
+  either value** — no `config/demo.php`, no controller check, no
+  scheduler entry. A fully documented, fully undocumented-as-unbuilt
+  control, the same drift shape as `B-04`.
+- **What this session built (Part B groundwork, genuinely low-risk —
+  no real infrastructure touched, nothing deployed).**
+  1. `config/demo.php` — `enabled`/`reset_schedule`, reading the two
+     existing env vars for the first time.
+  2. `HandleInertiaRequests::share()` now exposes `demoMode` globally;
+     `Welcome.vue` renders the warning banner Demo Instance Data
+     Safety's control 4 calls for, gated on it.
+  3. `App\Console\Commands\ResetDemoInstanceCommand` (`demo:reset`) —
+     control 1 (scheduled reset). Truncates every subject/activity table
+     in one statement (Postgres refuses per-table truncation across
+     tables with mutual FK references otherwise — see the command's own
+     comment) and re-seeds the standard fresh-install baseline
+     (`PolicyDefinitionSeeder` + the reference connector). **Refuses to
+     run unless `config('demo.enabled')` is true** — the load-bearing
+     safety property, since `routes/console.php` registers its scheduler
+     entry unconditionally (matching `ExecuteRetentionPoliciesCommand`'s
+     existing "registration is unconditional, the command decides"
+     shape), so a real self-hosted instance can never have this entry
+     silently wipe its data.
+  4. `routes/console.php` now schedules `demo:reset` via
+     `config('demo.reset_schedule')` (a real cron expression, not
+     hardcoded), inert on any instance that hasn't set `DEMO_MODE=true`.
+- **What this session deliberately did NOT build, and why — both
+  genuine open design questions, not oversights.**
+  1. **Control 2 (no persistent shared admin credential / a temporary,
+     scoped per-visitor demo identity).** `demo:reset` leaves `users`
+     untouched specifically because no such per-visitor identity
+     mechanism exists yet — truncating `users` today would just lock
+     every visitor out with nothing to replace it. Designing that
+     mechanism (a scoped, auto-expiring session identity a demo visitor
+     gets without a real login) is real product/security design work,
+     not "groundwork," and is filed as `B-08`.
+  2. **Richer synthetic demo content.** `demo:reset` resets to the same
+     minimal baseline `php artisan db:seed` already produces (five — now
+     six, `B-04` — ABAC policies) plus the reference connector, not a
+     populated set of sample consent purposes/notices/records a visitor
+     could actually explore. Deciding what a compelling, safe demo
+     dataset looks like is a content/product decision this session
+     wasn't going to rush; filed as `B-07`.
+  3. **Control 3 (connector registration disabled entirely on the demo
+     build).** No code change was needed: Session 10 already decided
+     connector management is CLI-only with no HTTP registration
+     endpoint at all, and the only registration command
+     (`connectors:register-reference`) registers exclusively the
+     reference/stub connector. The control this threat-model item
+     describes is already structurally satisfied by that earlier
+     decision — recorded here so a future session doesn't rebuild
+     something that already exists for a different reason.
+  4. **Control 5 (isolation, spend cap, scoped credentials) and TLS.**
+     Infrastructure-level, and no hosting target has ever been decided
+     (checked `00-project-brief.md`, `03-architecture.md`,
+     `01-scope-and-non-goals.md`, `14-maintenance-and-retirement.md` —
+     "a public hosted demo instance will exist" is decided; *where* is
+     not). See `12-session-handoff.md`'s Part B plan for the
+     recommendation and the concrete session breakdown this now needs.
+- **Not an ADR.** No ADR ever specified the demo reset's implementation —
+  this is new, narrow, within-scope implementation work (a documented
+  control finally gaining code), logged here per the same judgement call
+  Session 11/12 used for their own non-ADR decisions.

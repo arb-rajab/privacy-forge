@@ -25,6 +25,17 @@ async function logout() {
 
 <template>
   <div style="font-family: system-ui; padding: 2rem;">
+    <div
+      v-if="page.props.demoMode"
+      role="alert"
+      style="border: 2px solid #b33; padding: 0.75rem 1rem; margin-bottom: 1.5rem; background: #fff2f2;"
+    >
+      <strong>This is a public demo instance.</strong> It resets to
+      synthetic seed data on a fixed schedule. Never enter real personal
+      data here — anything entered is not private and will be discarded
+      at the next reset.
+    </div>
+
     <h1>privacy-forge</h1>
     <p>{{ status }}</p>
 
@@ -57,6 +68,9 @@ async function logout() {
       </li>
       <li v-if="page.props.auth.user">
         <a href="/admin/policies">ABAC policies</a>
+      </li>
+      <li v-if="page.props.auth.user">
+        <a href="/admin/audit-log">Audit log</a>
       </li>
     </ul>
   </div>

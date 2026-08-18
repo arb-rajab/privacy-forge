@@ -91,3 +91,11 @@ Route::get('/admin/ropa', function () {
 Route::get('/admin/policies', function () {
     return Inertia::render('AdminPolicies');
 })->middleware('auth');
+
+// Audit log query view (B-04, this session) — a UI shell around the new
+// GET /api/v1/admin/audit-log endpoint (Admin\AuditLogController,
+// audit.log.view). See AdminAuditLog.vue for why this page never applies
+// its own row-level scoping client-side — that's a server decision.
+Route::get('/admin/audit-log', function () {
+    return Inertia::render('AdminAuditLog');
+})->middleware('auth');
