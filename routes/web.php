@@ -63,3 +63,31 @@ Route::get('/dsar/status/{signedToken}', function (string $signedToken) {
 Route::get('/admin/dsar', function () {
     return Inertia::render('AdminDsarQueue');
 })->middleware('auth');
+
+// Retention policy management UI (Session 21) — a UI shell around the
+// unchanged Admin\DataCategoryController / Admin\RetentionPolicyController
+// JSON API (docs/architecture/openapi.yaml's "Admin — Purposes and
+// Policies" tag). No new endpoints: this page only calls
+// GET/POST /api/v1/admin/data-categories, GET/POST/PATCH
+// /api/v1/admin/retention-policies, and POST .../dry-run — see
+// AdminRetention.vue for how it keeps the dry-run/real-execution
+// distinction ADR-0002 exists for unambiguous in the UI itself.
+Route::get('/admin/retention', function () {
+    return Inertia::render('AdminRetention');
+})->middleware('auth');
+
+// RoPA export UI (Session 21) — a single page around the unchanged
+// GET /api/v1/admin/ropa/export?format=csv|pdf endpoint (US-013/FR-016).
+Route::get('/admin/ropa', function () {
+    return Inertia::render('AdminRopa');
+})->middleware('auth');
+
+// ABAC policy definition view/edit UI (Session 21, stretch) — a UI shell
+// around the unchanged Admin\PolicyController JSON API (policy.update,
+// ADR-0006). Owner-only at the API layer; this page renders for any
+// authenticated staff user and surfaces the ABAC denial inline, matching
+// every other admin page's convention of not duplicating server-side
+// authorisation in the client.
+Route::get('/admin/policies', function () {
+    return Inertia::render('AdminPolicies');
+})->middleware('auth');

@@ -49,6 +49,15 @@ async function logout() {
       <li v-if="page.props.auth.user">
         <a href="/admin/dsar">DSAR queue</a>
       </li>
+      <li v-if="page.props.auth.user">
+        <a href="/admin/retention">Retention policies</a>
+      </li>
+      <li v-if="page.props.auth.user">
+        <a href="/admin/ropa">RoPA export</a>
+      </li>
+      <li v-if="page.props.auth.user">
+        <a href="/admin/policies">ABAC policies</a>
+      </li>
     </ul>
   </div>
 </template>

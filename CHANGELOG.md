@@ -6,6 +6,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (Session 21, 2026-08-18)
+- **Retention policy management UI** (`/admin/retention`): view/create
+  data categories and retention policies, with a dry-run preview button
+  that makes unmistakably clear it makes no changes (US-010/US-011). No
+  real-execution button exists by design — real execution only ever runs
+  on the server's own schedule (Session 11 decision, unchanged), never
+  from a staff HTTP request.
+- **RoPA export UI** (`/admin/ropa`): download the Record of Processing
+  Activities as CSV or PDF, format choice visible as two separate
+  buttons (US-013).
+- **ABAC policy management UI** (`/admin/policies`, stretch): view every
+  sensitive action's current policy and its history; editing requires an
+  explicit per-policy confirmation before it's enabled, since this edits
+  live separation-of-duties logic.
+- All three UIs call only pre-existing `GET`/`POST`/`PATCH` endpoints —
+  no API contract changes.
+- Found and filed two pre-existing spec/implementation gaps while
+  scoping this work (not fixed, per this session's UI-only scope): `GET
+  /admin/audit-log` is documented in `openapi.yaml` but was never
+  implemented (`B-04`); no read endpoint exists for past retention
+  execution history or their deletion certificates (`B-05`). See
+  `docs/project-memory/11-backlog.md`.
+
 ### Documented (Session 20, 2026-08-18)
 - **Retroactively decided and documented the Laravel version this
   repository actually runs on.** Forensic investigation traced an
