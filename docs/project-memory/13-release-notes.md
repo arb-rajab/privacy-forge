@@ -109,6 +109,30 @@ fixed — full accounts in `docs/CASE-STUDY.md`:
   the hash chain provides tamper-evidence independently; closing this
   fully needs a second, lower-privileged migration-only database role.
 
+### Known debt going into v1.0.0 (stated plainly, not silently carried)
+This release closes R-02 through R-06 for real (see "Fixed"/"Added"
+above and `docs/CASE-STUDY.md`) and formally accepts R-08 as a residual
+risk. It does **not** close everything — the following remain open,
+tracked, and non-blocking by explicit decision, not by omission:
+- **`R-01`** — DB-level grant revocation gap on the audit log, open
+  since it was filed; see "Not included" above.
+- **`R-07`** — the Dockerfile cold-clone rebuild's GitHub rate-limit
+  block was re-checked on 2026-08-18 (the same day as this tag) and has
+  now cleared (`codeload.github.com` returns `200`, not `429`). Per
+  R-07's own follow-up trigger, this means the final clean-build
+  re-verification it was waiting on is now actionable — and has **not
+  yet been run**. The 643s+73s≈716s composed estimate (`10-risk-register.md`)
+  remains a composed estimate, not a single atomic measurement, until
+  that rebuild happens. This is genuinely overdue action, not future
+  work: it was unblocked on tag day and still hasn't been done.
+- **`B-01`–`B-06`** — six open backlog items (full-instance archival
+  export, a retention-policy uniqueness race, a weekly `osv-scanner`
+  re-run trigger, `GET /admin/audit-log`'s spec/implementation drift,
+  no read endpoint for retention execution history, per
+  `11-backlog.md`). None block v1.0.0's own scope; all are real,
+  itemized, and not silently dropped. `B-07`/`B-08` are already closed
+  (Session 24).
+
 ### Migration notes
 This is the first tagged release — there is no prior schema to migrate
 from. A fresh instance runs all 18 migrations via `php artisan migrate`
