@@ -4,385 +4,272 @@
 - Repository: `privacy-forge` (https://github.com/arb-rajab/privacy-forge)
 - Public or private: public (flagship)
 - Product/domain: Data-privacy / consent & DSAR compliance engine
-- Current version or branch: `main`, tagged **`v1.0.0`** this session.
+- Current version or branch: `main`, tagged `v1.0.0` at Session 25.
 
 ## Session completed
-- Session number and title: **Session 25 — close the four real Gate 9→10
-  gaps (stale architecture diagrams, missing demo asset, unpublished case
-  study, stale README), then answer plainly whether v1.0.0 is taggable.**
-- Objective: Part 1 — update `03-architecture.md` to reflect ADR-0006,
-  ADR-0007, and ADR-0008 by number, as a documentation-accuracy pass, not
-  new architecture work. Part 2 — produce a real demo asset (screenshots
-  or a recording) from the actual running application. Part 3 — write
-  `docs/CASE-STUDY.md`, synthesising 24 sessions of real handoffs, ADRs,
-  and risk-register entries into one honest narrative. Part 4 — refresh
-  the README's stale status banner and "Project status" section.
-- Status: **All four parts complete.** All four conditions of
-  `01-scope-and-non-goals.md`'s own "Definition of v1 complete" are now
-  genuinely met — see the verdict below. **`v1.0.0` has been tagged.**
-  187/187 tests pass, Pint/Larastan (level 8)/ESLint clean, OpenAPI
-  validates — all re-confirmed this session, not assumed.
+- Session number and title: **Session 27 — backlog staleness audit
+  (Part A), then close R-01 for real (Part B).**
+- Objective: Part A — verify the v1.0.0 release notes' claim of "six open
+  backlog items (B-01–B-06)" against actual repo state, not the user's
+  recollection, and correct `11-backlog.md`/`13-release-notes.md` if
+  stale. Part B — implement R-01 (audit log DB-level grant revocation)
+  for real: a genuinely non-owning Postgres role for the app's runtime
+  connection, UPDATE/DELETE revoked on `audit_log_entries`, proven with a
+  real test that connects as the app's normal credential and gets
+  rejected by Postgres itself.
+- Status: **Both parts complete.** 191/191 tests pass (185 Feature + 6
+  Unit), Pint/Larastan (level 8)/ESLint clean, OpenAPI validates,
+  end-to-end verified against both `docker-compose.yml` and
+  `docker-compose.prod.yml`'s real running stacks — all re-confirmed this
+  session, not assumed.
 
-## Part 1: `03-architecture.md` brought current
+## Part A: backlog staleness audit
 
-- **"Last updated" date** corrected from 2026-08-11 to 2026-08-18.
-- **The `PolicyEvaluator` description** now names ADR-0006 and ADR-0007
-  explicitly, as load-bearing behaviours rather than footnotes: the
-  fail-closed default (what happens on a missing policy, a malformed
-  condition, an evaluation exception) and the `not_equals_attribute`
-  cross-field comparison operator that `dsar.erasure.approve`'s
-  separation-of-duties condition actually runs on.
-- **The "Technology choices summary" table** now lists all 8 ADRs, not 5
-  — the three added rows are ADR-0006 (fail-closed default), ADR-0007
-  (cross-field comparison operator), and ADR-0008 (Laravel 12
-  retroactive adoption).
-- **No redesign.** The system context/container diagrams, the three
-  sequence diagrams, and every other section were left untouched —
-  this was a documentation-accuracy pass matching docs to code that
-  already existed and already worked, exactly as scoped. The container
-  diagram already correctly said "Laravel 12" (a prior session's
-  ADR-0008 consequence had already been applied there); no stale
-  "Laravel 11" mention existed anywhere in this file.
+The user's recollection was correct, and the docs were stale. Verified
+directly against commit history and current code, not assumed:
 
-## Part 2: a real demo asset, captured without touching R-08
+- **B-04** (`GET /admin/audit-log`) and **B-05** (retention execution
+  history endpoint) were both built and closed at **Session 22**
+  (`c23f665`) — `AuditLogController::index` and
+  `RetentionPolicyController::executions` both exist, are routed, and are
+  covered by Feature tests. Confirmed present in the current codebase.
+- **B-06** (production image) was closed at **Sessions 23–24** — the
+  image built at Session 23 (`5d0ac8e`), the remaining infra-provisioning
+  half explicitly descoped at Session 24. `11-backlog.md`'s own B-06 row
+  already carried a "Fully closed, Session 24" note, but had been left in
+  the "Next up" table instead of moved to "Closed" — likely why it kept
+  getting miscounted as open.
+- **B-01, B-02, B-03** re-confirmed still genuinely open against current
+  code (not assumed from their descriptions): no `export-instance`-style
+  archival command exists; `RetentionPolicyController::store()` still
+  creates a new `active` policy with no uniqueness check against an
+  existing active row for the same `data_category_id`; `.github/
+  workflows/ci.yml` still has no `schedule:` trigger on the `osv-scanner`
+  job.
 
-`docs/demo/README.md` (new) and `docs/demo/screenshots/*.png` (new, 5
-files) — real screenshots of the actual running application: staff login,
-the DSAR queue (showing a genuine `pending_verification` and a genuine
-`partially_complete` request — not staged successes), a real retention
-dry-run preview against one genuinely retention-eligible record, the
-RoPA export page, and the audit log with real entries.
+**Fixed:** `11-backlog.md` — B-04/B-05/B-06 moved to "Closed" with real
+resolution detail and commit references; B-01–B-03 re-confirmed with a
+2026-08-19 note. `13-release-notes.md`'s "Known debt going into v1.0.0"
+section corrected from "B-01–B-06 — six open backlog items" to "B-01–B-03
+— three open backlog items," with an explicit note that the miscount was
+corrected after this audit.
 
-**Why screenshots, and how, matters as much as that they exist.** `R-08`
-is a formally accepted residual risk (Session 19): the Pest Browser
-Testing suite's Docker-launched Chromium hangs reliably on this host
-class, confirmed across three sessions of investigation on two
-independent hosts. Re-attempting that exact path for a demo recording
-would very likely reproduce the same hang — so it wasn't attempted.
-Instead, a small script (not committed — see below) drove a **native,
-host-installed Chrome** directly over the raw DevTools Protocol
-(WebSocket, no Playwright/Puppeteer dependency, no Docker-launched
-browser, no Pest) — a genuinely different mechanism from the one R-08
-investigated, not a retry of it. One real, small obstacle was found and
-worked around at the browser-launch level only: the dev stack's Vite
-client script is hardcoded to `0.0.0.0:5173`, which is not a connectable
-destination address from a host client (confirmed directly: `curl
-http://0.0.0.0:5173` fails, `curl http://localhost:5173` succeeds) — a
-`--host-resolver-rules=MAP 0.0.0.0 127.0.0.1` Chrome launch flag fixed
-this without touching any application or Vite config file.
+## Part B: R-01 closed for real
 
-The real demo data behind these screenshots (two owner accounts, a
-consent purpose, two DSARs taken through real identity-verification/
-erasure-approval by two different admins per ADR-0007, one retention
-policy, one backdated-and-withdrawn consent record to make the dry-run
-preview show a real non-zero result) was created entirely through the
-application's own real HTTP endpoints — the same ones the README's "Try
-it" section walks a human through — then the dev database was reset
-(`migrate:fresh`) afterward so this session leaves no demo-only data
-sitting in the tracked dev environment. The capture script itself lived
-only in the session scratch directory, not in the repository — `docs/
-demo/README.md` documents the method in full (including the exact Chrome
-flags) so it's reproducible, rather than leaving the mechanism opaque.
+**The original premise was half wrong, and testing that directly changed
+the design.** ADR-0003 assumed a table owner can't revoke privileges from
+itself. Tested against a real Postgres 16 instance: an owner *can*
+`REVOKE UPDATE, DELETE ON t FROM owner_role`, and Postgres genuinely
+enforces it — but the same owner role can just as trivially `GRANT` the
+privilege back to itself afterward, since ownership carries the
+unrevocable right to alter a table's ACL. Verified end to end: revoke,
+confirm `UPDATE` fails, `GRANT` it back, confirm the same connection now
+succeeds. Against R-01's actual threat model (the app's own runtime DB
+credential running buggy or attacker-controlled arbitrary SQL), a
+self-revoke is only a soft barrier — the same access that could tamper
+with a row could just as easily re-grant itself first.
 
-**One genuine, honest observation from setting this up, not swept
-under the rug:** the erasure DSAR's connector-dispatch job failed
-against this session's own instance of the already-running dev stack
-with a `DecryptException: The MAC is invalid` decrypting
-`subject_identifier` — reproducible even after restarting the `worker`
-container, root cause not chased down (out of scope: this is a
-pre-existing, long-lived container's runtime state issue across many
-prior sessions' testing on this same stack, not a new application
-defect, and no code was touched to work around it). The practical result
-is a genuine `partially_complete` DSAR in the screenshot rather than
-`complete` — which is, per FR-009 and the README's own existing framing,
-correct system behaviour under a real connector-delivery failure, not a
-bug being hidden. It is called out here in case a future session sees
-the same symptom and wants to investigate further; not logged as a new
-numbered risk, since it wasn't isolated to a specific root cause this
-session and didn't block anything this session needed.
+**What was built instead:** a second, genuinely non-owning Postgres role,
+`privacy_forge_app`. It does not own any table, is granted full
+SELECT/INSERT/UPDATE/DELETE everywhere it needs it, but only
+SELECT/INSERT on `audit_log_entries`. The schema-owning role
+(`privacy_forge`, unchanged) is now used only for `php artisan migrate
+--database=pgsql_migrate`; the running application (`app`/`worker`, both
+compose files) connects as `privacy_forge_app` for everything else.
 
-## Part 3: `docs/CASE-STUDY.md` written
+**A real correctness issue surfaced along the way:** Postgres requires
+the `UPDATE` privilege for `SELECT ... FOR UPDATE` *and* `FOR SHARE`,
+even without an actual `UPDATE` — verified directly. `AuditLogger::
+record()` used `->lockForUpdate()` to serialize concurrent hash-chain
+writes, which would have broken under the new role entirely (a role that
+can never legitimately need `UPDATE` would then be unable to insert into
+its own append-only log correctly). Fixed by replacing it with
+`pg_advisory_xact_lock(hashtext(...))`, which needs no table privilege at
+all and provides the same serialization guarantee.
 
-Covers, with real ADR numbers, risk IDs, and commit references throughout
-rather than generic claims:
-- The core engineering story: the fail-closed ABAC engine (ADR-0001,
-  ADR-0006) and the tamper-evident, externally-anchored audit log
-  (ADR-0003), with the real full-chain-rewrite attack simulation
-  (`tests/Feature/AuditChainAnchorTest.php`) as evidence, not assertion.
-- **Three real bugs**, each picked for a different failure class: the
-  `RetentionSelector` re-certification bug (Session 12) — a real
-  correctness bug found via a real integration test, not inspection; the
-  export-bundle TTL gap (Session 8→10) — every piece individually
-  correct and tested, the actual data-subject-facing integration never
-  wired; the `vendor/`-shadowing Docker bug (Session 5's `97868f1`) —
-  and its role as the same commit that (separately) introduced the
-  Laravel 12 drift.
-- **The ADR-0008 Laravel governance incident as its own full section**,
-  not a footnote — the setup (frozen "Laravel 11" ledger), the
-  divergence (a commit whose own `CHANGELOG.md` argued against a bump it
-  shipped anyway), the compounding (14 sessions inheriting a
-  trust-the-docs-over-the-file gap), how Session 20 found it (forensic
-  git-history reconstruction, not a re-read of prior handoffs), the
-  retroactive resolution, and the CI safeguard now verified against the
-  actual historical commit's failure mode.
-- **Honest judgment calls**, named as such: R-08 accepted as residual
-  after three sessions of real, evidence-based investigation rather than
-  chased indefinitely; the live public demo explicitly descoped at
-  Session 24 with the actual cost/benefit reasoning stated, not silently
-  dropped.
+**A test-harness-only deadlock found and fixed:** three existing tests
+(`ResetDemoInstanceCommandTest`, `AuditChainAnchorTest`,
+`ConsentCaptureTest`) either invoke `demo:reset` (whose `TRUNCATE` must
+now run via the owning connection) or simulate direct-DB-access tampering
+via that same owning connection — both now genuinely separate Postgres
+sessions from the test's default connection. Two real, confirmed
+consequences: (1) `RefreshDatabase` holds the whole test in one open
+transaction, so a cross-session `TRUNCATE` deadlocks against it forever —
+reproduced and confirmed via `pg_stat_activity` (one session `idle in
+transaction`, the other blocked on a `relation` lock), not a flaky
+timeout; (2) rows inserted-but-uncommitted on the default connection are
+genuinely invisible to the other session, confirmed directly via
+`tinker` — so a same-test cross-connection write silently matched zero
+rows rather than erroring, which is why the first fix attempt "passed"
+for the wrong reason. Both fixed with an explicit `DB::commit()` before
+crossing connections, each commented with why. Neither is a production
+concern: a scheduled `demo:reset` never runs inside another request's
+open transaction, and a real attacker with direct DB access acts on
+already-committed rows.
 
-## Part 4: README refreshed
+**Proof, not just design:** `tests/Feature/AuditLogGrantEnforcementTest.php`
+connects as the real app runtime role (confirmed via `current_user`,
+distinct from the migrate role) and issues raw SQL UPDATE/DELETE against
+`audit_log_entries` directly — not through `AuditLogEntry::save()`/
+`delete()`, which already throw at the application layer and would prove
+nothing about the database itself. Both rejected with Postgres error
+`42501` (`insufficient_privilege`); SELECT/INSERT still work (positive
+control). Independently reproduced via a raw `psql` session against both
+compose files' Postgres, and end to end against the running
+`docker-compose.prod.yml` stack: the role-creation migration run against
+its *existing* data volume (not just a fresh one — idempotent, checked
+via `pg_roles`), a real `privacy-forge:create-owner`, a real `POST
+/login` over HTTPS, and a real authenticated `GET
+/api/v1/admin/audit-log` returning that login's own audit entries.
 
-- **Status banner** rewritten from "Session 13" to `v1.0.0-pending`
-  (written before this session's tagging decision was finalised further
-  down this document — the banner itself now reads as current either
-  way, describing what's implemented rather than a session number),
-  linking the new case study and demo screenshots.
-- **"Project status"** rewritten to describe actual capabilities plainly
-  (consent, DSAR lifecycle, retention, RoPA, ABAC, audit log — each with
-  its governing ADR named) instead of leading with a session number, per
-  the explicit instruction that 24 sessions in, session-number framing
-  has served its purpose. R-08 is named here too, honestly, alongside
-  the capabilities it doesn't yet cover.
-- **A pointer to `docs/demo/`** added right after the Quickstart, for a
-  reader who wants to see the walkthrough before running it.
-- **Three dangling "this session"/"closed this session" phrases** in the
-  existing "Try it" walkthrough were also fixed (R-02/R-05/R-06
-  closures now name their actual closing session numbers instead of a
-  now-meaningless relative "this session") — a small, in-scope
-  documentation-accuracy fix alongside the explicitly-requested banner
-  change, since leaving them would have continued to read as stale the
-  same way the banner did.
-
-## An additional gap found and fixed, beyond the four named tasks
-
-While checking condition 3's "SDLC evidence map complete" sub-item
-directly rather than assuming it was still accurate, `docs/
-SDLC-EVIDENCE.md` turned out to be **genuinely stale in three rows**:
-it said "6 ADRs" (now 8), described testing as "currently one
-environment smoke test — feature tests begin at Session 6" (now 187
-Pest tests including an exhaustive authorisation matrix and the audit-
-chain attack simulation), and described deployment as "still pending
-Session 8" (Sessions 22–24 actually built and verified a full production
-stack, and Session 24's decision explicitly descopes live public
-infrastructure — a different, decided state, not a still-pending one).
-This wasn't one of the four tasks named for this session, but it
-directly gates condition 3 below, so it was fixed rather than left as a
-known, easily-fixed gap standing between a genuine "yes" and this
-session's own verdict. All three rows corrected against the real current
-state (`docs/adr/`, `tests/`, `docs/project-memory/08-deployment-and-
-operations.md`); `docs/project-memory/13-release-notes.md` — a second,
-smaller pre-existing gap (a template that had never once been filled in
-across 24 sessions) — was also populated with real v1.0.0 release notes,
-for the same reason.
-
-## The "v1 complete" verdict — checked against all four conditions, not asserted
-
-`01-scope-and-non-goals.md`'s own "Definition of v1 complete" has four
-independent conditions:
-
-1. **Every MVP boundary box checked and demonstrably working
-   end-to-end.** ✅ Unaffected this session — confirmed 9/9 at Session
-   24, re-affirmed here: every admin page exercised again this session
-   while setting up the demo screenshots (login, DSAR queue, identity
-   verification, erasure approval by a second admin, retention policy
-   creation, dry-run preview, RoPA export, audit log) worked against a
-   freshly seeded stack, exactly as the README describes.
-2. **All five success metrics met and verifiable by a third party.**
-   ✅ Unaffected — Metrics 1–4 previously confirmed, Metric 5 revised
-   and confirmed at Session 24. Nothing in this session's docs-only
-   scope touches any of them.
-3. **The Gate 9→10 checklist: README quickstart verified on a clean
-   machine, diagrams current, demo available, SDLC evidence map
-   complete, case study published.** ✅ **All five sub-items now
-   genuinely pass:**
-   - **README quickstart:** ✅ already genuinely re-verified fresh at
-     Session 24 (full teardown-and-rebuild); this session additionally
-     ran every "Try it" step for real again while setting up demo data
-     (see Part 2) — the walkthrough is not stale.
-   - **Diagrams current:** ✅ fixed this session (Part 1) —
-     `03-architecture.md` now names ADR-0006/0007/0008 by number.
-   - **Demo available:** ✅ fixed this session (Part 2) — real
-     screenshots exist in `docs/demo/`, with an honest account of why a
-     recording wasn't attempted and how the screenshots were actually
-     captured.
-   - **SDLC evidence map complete:** ✅ `docs/SDLC-EVIDENCE.md` existed
-     but was itself stale (see above) — fixed this session, checked
-     directly rather than assumed still accurate.
-   - **Case study published:** ✅ fixed this session (Part 3) —
-     `docs/CASE-STUDY.md` now exists, is specific and factual, and
-     covers the ADR-0008 incident as its own full section.
-4. **No non-goal has silently crept back into scope.** ✅ Unaffected —
-   nothing this session touches the non-goals table; no ADR opened or
-   reopened; GDPR-only and single-tenancy untouched.
-
-**Verdict, stated plainly: yes — v1.0.0 is genuinely taggable, and has
-been tagged this session.** All four conditions hold on their real
-merits, each checked directly against the current state of the
-repository rather than carried forward from a prior session's assertion
-(the same discipline that caught `01-scope-and-non-goals.md`'s own
-stale file citation earlier this session, and that caught
-`SDLC-EVIDENCE.md`'s staleness above). This closes the flagship's build
-phase — the documentation/demo/case-study work the original session
-spine called "Session 9" — 25 sessions later than that name suggests,
-which is itself consistent with this project's own established practice
-of naming things honestly rather than by their original plan.
-
-**What "v1.0.0" does not claim**, stated as plainly as the rest of this
-document: no live public URL exists (Session 24's explicit, recorded
-decision); the browser-driven end-to-end admin-dashboard test remains an
-accepted residual gap (R-08); `R-01` (audit log DB-grant revocation)
-remains open. None of these are new findings — all three are pre-existing,
-already-decided, already-documented states this session left exactly as
-it found them, listed here only so a reader of this handoff doesn't have
-to infer them from silence.
-
-## Action taken: the tag
-
-```
-git tag -a v1.0.0 -m "v1.0.0 — first tagged release, see docs/project-memory/13-release-notes.md"
-```
-
-Committed and pushed this session, along with `main`, per this session's
-own explicit instruction to commit and push once tests were confirmed
-genuinely passing (they were — see Validation performed, above).
+**Decision recorded, not silently redesigned:** the full reasoning above
+— including the empirical test of the rejected self-revoke alternative —
+is in `09-decision-log.md`'s Session 27 entry. ADR-0003 itself was not
+reopened (per this session's ground rules); the entry explicitly notes
+it's a correction to the ADR's stated premise, not its Decision.
 
 ## What was explicitly NOT done this session, and why
 
-1. **No ADR opened or reopened.** ADR-0006/0007/0008 were read and cited,
-   never modified.
-2. **`R-01` through `R-08` — not touched, none affected**, beyond citing
-   R-08's existing text to explain this session's screenshot-capture
-   method. No risk-register row was edited.
-3. **No application code changed.** Every change this session is a
-   Markdown file under `docs/` or `README.md`, plus the new PNG
-   screenshots. The one script used to drive the browser for screenshots
-   lived only in the session scratch directory and was never committed.
-4. **The demo/hosting decision was not reopened.** No real infrastructure
-   was provisioned; Session 24's decision stands exactly as recorded.
-5. **`R-07`'s rate-limit follow-up (due 2026-08-24)** — not yet due as of
-   this session (2026-08-18); not checked this session, since this
-   session's scope was documentation/demo/synthesis, not R-07.
+1. **No ADR opened, reopened, or modified.** ADR-0001–0008 untouched.
+   ADR-0003's premise was found to be partly wrong, but the fix is
+   recorded in the decision log, not as an ADR edit, per this session's
+   explicit ground rules.
+2. **R-08 not touched** — accepted, not revisited.
+3. **B-01, B-02, B-03** — re-confirmed still open, not picked up this
+   session (out of Part B's scope).
+4. **The OpenAPI contract was not touched** — confirmed via `git status`
+   before starting, and the validator still passes against the unchanged
+   spec.
+5. **No demo-hosting or infrastructure decision reopened.**
 
 ## Files created or changed
 
 **Created:**
-- `docs/CASE-STUDY.md`
-- `docs/demo/README.md`
-- `docs/demo/screenshots/01-login.png`, `02-dsar-queue.png`,
-  `03-retention-dry-run.png`, `04-ropa-export.png`, `05-audit-log.png`
+- `database/migrations/2026_08_19_000001_add_restricted_runtime_role_for_audit_log.php`
+- `tests/Feature/AuditLogGrantEnforcementTest.php`
+- `tests/Concerns/RefreshesDatabaseAsOwner.php`
 
 **Changed:**
-- `docs/project-memory/03-architecture.md` — "Last updated" date,
-  `PolicyEvaluator` description (ADR-0006/0007 named), Technology
-  choices summary table (8 ADRs, not 5).
-- `README.md` — status banner, "Project status" section, a pointer to
-  `docs/demo/`, three dangling "this session" phrases in the "Try it"
-  walkthrough corrected to name real session numbers.
-- `docs/SDLC-EVIDENCE.md` — three stale rows (ADR count, testing status,
-  deployment status) corrected against current reality; a pointer to
-  the case study and demo screenshots added.
-- `docs/project-memory/13-release-notes.md` — populated with real
-  v1.0.0 release notes (previously an empty template across 24
-  sessions).
-- `docs/project-memory/01-scope-and-non-goals.md` — the Gate 9→10
-  checklist citation fix already present in this session's starting
-  state (a stale `04-session-system-and-templates.md` in-repo file
-  citation, corrected to describe the checklist directly) is carried
-  forward unchanged by this session.
-- `docs/project-memory/12-session-handoff.md` (this file).
+- `docs/project-memory/11-backlog.md` — B-04/B-05/B-06 moved to Closed
+  with real detail; B-01–B-03 re-confirmed.
+- `docs/project-memory/13-release-notes.md` — open-debt count corrected
+  from six to three.
+- `docs/project-memory/10-risk-register.md` — R-01 closed with full
+  detail.
+- `docs/project-memory/09-decision-log.md` — new Session 27 entry (R-01
+  closure reasoning, the rejected self-revoke alternative, the advisory-
+  lock fix, the test-harness deadlock).
+- `config/database.php` — new `pgsql_migrate` connection.
+- `.env.example`, `.env` — `DB_USERNAME`/`DB_PASSWORD` now the restricted
+  runtime role; new `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD`.
+- `app/Services/AuditLogger.php` — `lockForUpdate()` replaced with
+  `pg_advisory_xact_lock`.
+- `app/Console/Commands/ResetDemoInstanceCommand.php` — its `TRUNCATE`
+  now runs via the `pgsql_migrate` connection.
+- `tests/Feature/ResetDemoInstanceCommandTest.php`,
+  `tests/Feature/AuditChainAnchorTest.php`,
+  `tests/Feature/ConsentCaptureTest.php` — `DB::commit()` before
+  cross-connection operations; the latter two's simulated tampering now
+  goes through `pgsql_migrate` (realistic: that's the elevated-access
+  threat they model).
+- `tests/Pest.php`, `tests/TestCase.php` — `RefreshDatabase` swapped for
+  the new `RefreshesDatabaseAsOwner` trait (routes `migrate:fresh` through
+  the owning connection; a plain method override on `TestCase` doesn't
+  work here, see the trait's own comment for why).
+- `docker-compose.yml`, `docker-compose.prod.yml` — explanatory comments
+  on the two-role split (no functional change needed beyond `.env`).
+- `.github/workflows/ci.yml` — both jobs' migrate steps now use
+  `--database=pgsql_migrate` with the owner's real credentials.
+- `README.md`, `CONTRIBUTING.md`,
+  `docs/project-memory/08-deployment-and-operations.md` — migrate command
+  updated to `--database=pgsql_migrate`.
 
-**Not changed:** any ADR, any application PHP/JS/Vue source,
-`composer.json`/`composer.lock`/`package.json`, any migration, `R-01`
-through `R-08`'s risk-register rows, the non-goals table.
+**Not changed:** any ADR, the OpenAPI spec, R-08, B-01/B-02/B-03's
+substance (only their audit-confirmed status), any frontend code.
 
 ## Validation performed
 
-- **`composer test` (Pest, dev stack) → 187/187 passed**, re-run this
-  session against the same dev stack used to capture the demo
-  screenshots (reset via `migrate:fresh` afterward, so this session's
-  demo data does not linger in the tracked dev environment).
-- **`composer lint` (Pint) → clean, 161 files.**
+- **Full test suite → 191/191 passed** (185 Feature + 6 Unit), run
+  against the real dev docker-compose stack. (The Browser suite, R-08's
+  accepted residual risk, was not run — it's outside `phpunit.xml.dist`'s
+  declared testsuites and known to hang on this host class regardless.)
+- **`composer lint` (Pint) → clean, 164 files.**
 - **`composer analyse` (Larastan, level 8) → 0 errors, 68 files.**
 - **`npm run lint` (ESLint) → clean.**
 - **`docs/architecture/openapi.yaml` → valid**, same throwaway
-  `python:3.12-slim`-container method prior sessions used.
-- **Every admin page and the full "Try it" walkthrough** exercised for
-  real against a freshly seeded stack while producing the demo
-  screenshots (Part 2) — a second, independent re-verification of the
-  same claims Session 24's quickstart re-check made.
+  `python:3.12-slim`-container method prior sessions used; confirmed
+  untouched by this session's changes via `git status` first.
+- **R-01 proven twice, independently:** the Pest test suite, and a raw
+  `psql` session as `privacy_forge_app` against both compose files'
+  Postgres.
+- **End-to-end against the real running `docker-compose.prod.yml`
+  stack:** rebuilt and recreated to pick up the new `.env`; the migration
+  run against its pre-existing data volume; grants confirmed via `\dp`;
+  a real `privacy-forge:create-owner`, `POST /login` over HTTPS, and
+  `GET /api/v1/admin/audit-log` all succeeded, returning that login's own
+  audit entries.
 
 ## Open questions and risks
 
-- **`R-01`** — still open, unaffected.
-- **`R-07`**'s rate-limit follow-up — due 2026-08-24, not yet due, not
-  checked this session.
-- **`R-08`** — unchanged, accepted residual. This session's demo
-  screenshots were captured by a mechanism specifically designed to
-  avoid the exact path R-08 describes, not to resolve it — the
-  underlying browser-automation gap remains open, honestly.
-- **`B-01`, `B-02`, `B-03`** — unchanged, still open, out of this
-  session's scope.
+- **R-01** — closed. See `10-risk-register.md`.
+- **B-01, B-02, B-03** — confirmed still open this session, unchanged.
+- **R-07** — closed at Session 26, unaffected by this session.
+- **R-08** — unchanged, accepted residual.
 
 ## Next recommended session
 
-The flagship's build phase is closed by this session's tag, and `main`
-plus the `v1.0.0` tag are both pushed. What remains is genuinely post-v1:
+Genuinely post-v1 work remains: B-01 (archival export), B-02 (retention
+policy uniqueness race), B-03 (weekly `osv-scanner` re-run trigger) — none
+block anything closed so far.
 
-1. **Optionally**, a GitHub Release built from
-   `docs/project-memory/13-release-notes.md`'s new v1.0.0 entry, if the
-   portfolio's own convention calls for one — not attempted this session
-   since it wasn't named in this session's scope.
-2. `R-01` (the DB-grant revocation gap), `R-07`'s rate-limit follow-up
-   (due 2026-08-24), and the deferred-to-backlog items in
-   `11-backlog.md` — none of which block the tag this session made.
-
-- Inputs required: `docs/project-memory/11-backlog.md` and
-  `10-risk-register.md` for whatever genuinely-post-v1 work is picked up
-  next.
+- Inputs required: `docs/project-memory/11-backlog.md` for the exact
+  current state of B-01–B-03.
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, **tagged `v1.0.0`** this session —
-both pushed.
+**Repository state:** branch `main`, tagged `v1.0.0` (Session 25) — this
+session's changes not yet pushed as of this handoff being written.
 
 **Current stack:** unchanged — no dependency versions touched this
-session.
+session. Two Postgres roles now exist per instance (`privacy_forge`,
+schema owner; `privacy_forge_app`, restricted runtime role) — see
+`config/database.php`.
 
 **Architecture decisions that must not be reversed:** all ADRs
-(0001–0008), GDPR-only, single-tenant, the Session 24 demo-hosting
-revision (no real public infrastructure).
+(0001–0008, none reopened — ADR-0003's stated premise was corrected in
+the decision log, not the ADR itself), GDPR-only, single-tenant, the
+Session 24 demo-hosting revision (no real public infrastructure), R-01's
+two-role design (a self-revoking single role was tested and rejected —
+don't re-propose it without re-reading the Session 27 decision-log
+entry).
 
 **Implementation state:**
-- Done: everything through Session 24, plus this session's documentation
-  closeout — architecture diagrams current, a real demo asset, a
-  published case study, a current README, and `v1.0.0` tagged.
+- Done: everything through Session 26, plus this session's backlog audit
+  and R-01's real DB-level grant revocation.
 - In progress: nothing mid-flight.
-- **Known gaps, unchanged and honestly still open:** `R-01` (DB-grant
-  revocation), `R-07`'s rate-limit follow-up (due 2026-08-24), `R-08`
-  (browser E2E, accepted residual), `B-01`/`B-02`/`B-03`.
-- Not started: any genuinely post-v1 work (`R-01`, `R-07`'s follow-up,
-  `11-backlog.md`'s deferred items) — none of it was in this session's
-  scope, and none of it blocks the tag this session made.
+- **Known gaps, unchanged and honestly still open:** `B-01`, `B-02`,
+  `B-03`; `R-08` (browser E2E, accepted residual).
+- Not started: `B-01`–`B-03`.
 
 **Constraints and non-goals:** unchanged since Session 1. Still at the
 2-new-technology cap (ABAC, ASVS L2).
 
-**Task for next session (single objective):** pick up genuinely post-v1
-work — `R-01`, `R-07`'s follow-up, or `11-backlog.md`'s deferred items —
-none of which block or reopen anything this session closed.
+**Task for next session (single objective):** pick up `B-01`, `B-02`, or
+`B-03` from `11-backlog.md` — none block or reopen anything this session
+closed.
 
 **Files to attach or paste:**
 - `docs/project-memory/12-session-handoff.md` (this file)
-- `docs/project-memory/13-release-notes.md` (the new v1.0.0 entry)
-- `docs/CASE-STUDY.md`
+- `docs/project-memory/11-backlog.md`
+- `docs/project-memory/09-decision-log.md` (Session 27 entry, for R-01's
+  reasoning if anything nearby is ever touched again)
 
-**Ground rules:** Do not reopen the demo-hosting decision without the
-user explicitly asking to actually fund and provision real
-infrastructure. Do not reopen any ADR. Do not reopen GDPR-only/
-single-tenant. `R-01` remains open; `R-07`'s follow-up isn't due until
-2026-08-24; `R-08` is accepted residual — don't reopen any of them
-without a genuine new finding.
+**Ground rules:** Do not reopen ADR-0001–0008. Do not re-propose a
+self-revoking single role for the audit log — tested and rejected this
+session, see the decision log. `R-08` is accepted residual — don't
+reopen it. `B-01`–`B-03` are real and open — don't assume they're closed
+without checking current code, the same standard this session held the
+backlog docs to.

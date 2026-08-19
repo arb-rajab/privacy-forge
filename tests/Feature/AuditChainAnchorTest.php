@@ -14,9 +14,14 @@ use Illuminate\Support\Str;
 // database access who edits an old entry *and* recomputes every
 // subsequent prev_hash/entry_hash so the chain looks internally
 // consistent again. This test performs that exact rewrite (bypassing
-// AuditLogEntry's append-only guard via DB::table(), the same technique
-// ConsentCaptureTest already uses to simulate DB-level tampering) and
-// proves verifyChain() is fooled while verifyAnchors() is not.
+// AuditLogEntry's append-only guard via the schema-owning connection,
+// the same technique ConsentCaptureTest already uses to simulate DB-
+// level tampering) and proves verifyChain() is fooled while
+// verifyAnchors() is not. It must use the owning connection, not the
+// app's default one: R-01 means the app's own runtime role genuinely
+// cannot UPDATE audit_log_entries any more (AuditLogGrantEnforcementTest)
+// — which is realistic here too, since the attacker this test models
+// has direct/elevated DB access, not the app's restricted credential.
 test('verifyAnchors detects a full chain rewrite that verifyChain alone cannot', function () {
     Storage::fake('s3');
 
@@ -44,6 +49,18 @@ test('verifyAnchors detects a full chain rewrite that verifyChain alone cannot',
     $entries = AuditLogEntry::query()->orderBy('sequence')->get();
     $tamperedEntry = $entries->first();
 
+    // R-01: the entries above were written via the app's default
+    // connection inside RefreshDatabase's still-open transaction —
+    // genuinely uncommitted from any other Postgres session's point of
+    // view, including `pgsql_migrate`'s. Without committing here first,
+    // the UPDATEs below would silently match zero rows (not error, just
+    // no-op — verified directly: an uncommitted insert on one connection
+    // is invisible to another), and this test would pass for the wrong
+    // reason. This mirrors real usage: a genuine attacker rewriting old
+    // entries would be acting on already-committed rows, never ones
+    // still inside another session's open transaction.
+    DB::commit();
+
     // Rewrite the tampered entry's action, then recompute prev_hash/
     // entry_hash for it and every entry after it, exactly as an attacker
     // with real DB access and knowledge of the (documented) hash formula
@@ -66,7 +83,7 @@ test('verifyAnchors detects a full chain rewrite that verifyChain alone cannot',
 
         $newHash = hash('sha256', $prevHash.json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
-        DB::table('audit_log_entries')->where('id', $entry->id)->update([
+        DB::connection('pgsql_migrate')->table('audit_log_entries')->where('id', $entry->id)->update([
             'action' => $payload['action'],
             'prev_hash' => $prevHash,
             'entry_hash' => $newHash,

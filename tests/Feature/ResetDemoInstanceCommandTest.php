@@ -36,6 +36,20 @@ test('when enabled, wipes subject/activity data and re-seeds the ABAC policies a
     $owner = User::factory()->owner()->create();
     app(AuditLogger::class)->record(actorType: 'staff', actor: $owner, action: 'test.action', resourceType: 'test_resource', resourceId: (string) Str::uuid());
 
+    // R-01: demo:reset's TRUNCATE runs via the schema-owning `pgsql_migrate`
+    // connection (a genuinely different Postgres session from the app's
+    // default connection), because the app's normal runtime role no
+    // longer has TRUNCATE on audit_log_entries. RefreshDatabase wraps this
+    // whole test in one still-open transaction on the default connection;
+    // without committing it first, the rows just inserted above are still
+    // only tentatively locked by that session, and TRUNCATE from the other
+    // session would block on them forever — a real Postgres lock wait, not
+    // a bug in this test, but also not something that can happen in real
+    // usage (a scheduled demo:reset never runs inside another request's
+    // still-open transaction). Committing here makes the test match that
+    // real-world ordering instead of an artifact of RefreshDatabase.
+    DB::commit();
+
     $this->artisan('demo:reset')
         ->expectsOutputToContain('Demo instance reset')
         ->assertSuccessful();
@@ -82,6 +96,11 @@ test('when enabled, the demo-viewer account is recreated fresh even if it existe
         'password' => Hash::make('a-different-stale-password'),
     ]);
 
+    // R-01: see the previous test's comment — demo:reset's TRUNCATE runs
+    // via a different connection than this test's default one, and would
+    // otherwise deadlock against RefreshDatabase's still-open transaction.
+    DB::commit();
+
     $this->artisan('demo:reset')->assertSuccessful();
 
     expect(User::query()->count())->toBe(1);
@@ -95,6 +114,9 @@ test('when enabled, the audit chain sequence restarts at genesis for the next wr
 
     $owner = User::factory()->owner()->create();
     app(AuditLogger::class)->record(actorType: 'staff', actor: $owner, action: 'test.action', resourceType: 'test_resource', resourceId: (string) Str::uuid());
+
+    // R-01: see the first test's comment in this file.
+    DB::commit();
 
     $this->artisan('demo:reset')->assertSuccessful();
 

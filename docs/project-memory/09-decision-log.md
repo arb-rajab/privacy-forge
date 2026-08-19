@@ -963,3 +963,101 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
 - **Not an ADR.** No ADR ever specified TLS or the demo-hosting design;
   this is `08-deployment-and-operations.md`'s own Session B/C plan being
   executed, re-scoped by the decision above, not a governance reversal.
+
+## R-01 closed for real: a genuinely separate runtime role, not owner self-revoke; hash-chain locking changed to an advisory lock (Session 27, 2026-08-19)
+
+- **Decision:** R-01 (`10-risk-register.md`) is closed by creating a
+  second Postgres role, `privacy_forge_app`, that does **not** own the
+  `audit_log_entries` table (or any other table) and is granted only
+  `SELECT`/`INSERT` on it (full `SELECT`/`INSERT`/`UPDATE`/`DELETE`
+  elsewhere, matching what it always needed). The schema-owning role
+  (`privacy_forge`, unchanged) is now used only for `php artisan migrate
+  --database=pgsql_migrate`; the running application (`app`/`worker` in
+  both compose files) connects as `privacy_forge_app` for everything
+  else. Implemented in
+  `database/migrations/2026_08_19_000001_add_restricted_runtime_role_for_audit_log.php`,
+  wired via `config/database.php`'s new `pgsql_migrate` connection.
+- **Alternative considered and empirically rejected: the owning role
+  revoking `UPDATE`/`DELETE` from itself.** ADR-0003's original text
+  assumed this was impossible ("Postgres doesn't allow an owner to
+  revoke privileges from itself") — tested directly against a real
+  Postgres 16 instance and found **half wrong**: an owner *can* run
+  `REVOKE UPDATE, DELETE ON t FROM owner_role`, and Postgres genuinely
+  enforces it against subsequent `UPDATE`/`DELETE` statements. But the
+  same owner role can just as trivially `GRANT` the privilege back to
+  itself afterward — ownership carries the right to alter a table's ACL
+  regardless of the ACL's current contents, and that specific right
+  cannot itself be revoked short of `ALTER TABLE ... OWNER TO`. Verified
+  end to end: revoke, confirm `UPDATE` fails, `GRANT` it back, confirm
+  the same connection now updates the row it "couldn't" a moment
+  earlier. Against R-01's actual threat model — the app's own runtime
+  DB credential running attacker-controlled or buggy arbitrary SQL — a
+  self-revoke is only a soft barrier: the same SQL access that could
+  tamper with a row could just as easily re-grant itself the privilege
+  first. A role that never owned the table and holds no grant option
+  cannot do this — `GRANT` requires ownership, superuser, or an existing
+  grant option, none of which it has. This is a correction to ADR-0003's
+  stated premise, not a reversal of its Decision (Option A + B); ADR-0003
+  itself is not reopened (per this session's ground rules) — recorded
+  here since the premise, not the decision, was what needed fixing.
+- **Real correctness issue found and fixed as a direct consequence:**
+  Postgres requires the `UPDATE` privilege for `SELECT ... FOR UPDATE`
+  **and** `SELECT ... FOR SHARE`, even though neither issues an actual
+  `UPDATE` — verified directly (a role granted only `SELECT`/`INSERT`
+  gets `permission denied` on both). `AuditLogger::record()` used
+  `->lockForUpdate()` to serialize concurrent hash-chain writes, which
+  would have broken outright under the new restricted role — a role
+  that can never legitimately need `UPDATE` to write the log correctly
+  would otherwise be unable to insert into it at all. Fixed by replacing
+  the row lock with `pg_advisory_xact_lock(hashtext(...))`: an advisory
+  lock needs no table privilege of any kind, and still serializes the
+  "read last hash → compute next hash → insert" critical section the
+  same way the row lock did. **Not an ADR:** this is an implementation
+  detail of ADR-0003's existing hash-chain mechanism (how concurrent
+  writers are serialized), not a change to the tamper-evidence design
+  itself — logged here per the same judgement call Session 7 made for
+  cross-field vs. fail-closed documentation-only decisions.
+- **A second, test-only interaction found and fixed:** tests that
+  either (a) invoke `demo:reset` (whose `TRUNCATE` must now run via the
+  owning `pgsql_migrate` connection, since the runtime role deliberately
+  has no `TRUNCATE` on `audit_log_entries`) or (b) simulate direct-DB-
+  access tampering by writing to `audit_log_entries` via that same owning
+  connection, do so from a **second, genuinely separate Postgres
+  session** — not just a different Laravel connection name. Two real,
+  verified consequences of that: (1) `RefreshDatabase` holds the whole
+  test in one open transaction on the default connection, so a `TRUNCATE`
+  issued from the other session blocks on that transaction's locks
+  forever — a real deadlock, reproduced and confirmed via
+  `pg_stat_activity` (one session `idle in transaction`, the other
+  `active`/`Lock`/`relation`), not a flaky timeout. (2) Rows inserted-but-
+  not-committed on the default connection are genuinely invisible to the
+  other session — verified directly via `tinker` — so a same-test
+  cross-connection write against them silently matches zero rows rather
+  than erroring. Both are fixed the same way: an explicit `DB::commit()`
+  before crossing to the other connection, in
+  `tests/Feature/ResetDemoInstanceCommandTest.php`,
+  `tests/Feature/AuditChainAnchorTest.php`, and
+  `tests/Feature/ConsentCaptureTest.php` — each commented with why. This
+  only affects the test harness: real usage never holds an explicit
+  transaction open across either boundary (a scheduled `demo:reset` runs
+  in its own process; a real attacker with direct DB access is acting on
+  already-committed rows).
+- **Proof, not just design:**
+  `tests/Feature/AuditLogGrantEnforcementTest.php` connects as the real
+  app runtime role (confirmed via `current_user`, distinct from the
+  migrate role) and issues raw SQL `UPDATE`/`DELETE` against
+  `audit_log_entries` — not through `AuditLogEntry::save()`/`delete()`,
+  which already throw at the application layer and would prove nothing
+  about the database itself. Both are rejected with Postgres error
+  `42501` (`insufficient_privilege`); `SELECT`/`INSERT` still work
+  (positive control). Independently reproduced with a raw `psql` session
+  as `privacy_forge_app` against both `docker-compose.yml` and
+  `docker-compose.prod.yml`'s Postgres, and end to end against the
+  running prod-shape stack: real migration run
+  (`--database=pgsql_migrate`) against its *existing* data volume (not
+  just a fresh one — the role-creation migration is idempotent, checked
+  via `pg_roles`), a real `privacy-forge:create-owner`, a real `POST
+  /login` over HTTPS, and a real authenticated `GET
+  /api/v1/admin/audit-log` returning that login's own audit entries —
+  the app runtime role's `SELECT`/`INSERT` path fully working, same
+  standard as every other verified claim in this project.

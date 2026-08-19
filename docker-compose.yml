@@ -126,6 +126,17 @@ services:
       minio:
         condition: service_healthy
 
+  # R-01 (docs/project-memory/10-risk-register.md): POSTGRES_USER here is
+  # the schema-owning role only — config/database.php's `pgsql_migrate`
+  # connection (DB_MIGRATE_USERNAME/PASSWORD in .env) is what `php artisan
+  # migrate` actually authenticates as. The app/worker containers below
+  # connect as a second, genuinely non-owning role (DB_USERNAME/PASSWORD
+  # in .env, default `privacy_forge_app`) created by this repo's
+  # add_restricted_runtime_role_for_audit_log migration the first time
+  # `migrate` runs against a given Postgres instance — not provisioned
+  # here via a docker-entrypoint-initdb.d script, since that only runs
+  # against a brand-new data volume and this needs to work against an
+  # existing one too.
   postgres:
     image: postgres:16-alpine
     environment:

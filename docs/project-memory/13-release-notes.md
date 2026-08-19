@@ -124,13 +124,16 @@ It does **not** close everything — the following remain open,
 tracked, and non-blocking by explicit decision, not by omission:
 - **`R-01`** — DB-level grant revocation gap on the audit log, open
   since it was filed; see "Not included" above.
-- **`B-01`–`B-06`** — six open backlog items (full-instance archival
+- **`B-01`–`B-03`** — three open backlog items (full-instance archival
   export, a retention-policy uniqueness race, a weekly `osv-scanner`
-  re-run trigger, `GET /admin/audit-log`'s spec/implementation drift,
-  no read endpoint for retention execution history, per
-  `11-backlog.md`). None block v1.0.0's own scope; all are real,
-  itemized, and not silently dropped. `B-07`/`B-08` are already closed
-  (Session 24).
+  re-run trigger, per `11-backlog.md`). None block v1.0.0's own scope;
+  all are real, itemized, and not silently dropped. `B-04`/`B-05`
+  (audit-log read endpoint, retention execution history endpoint) were
+  actually closed at Session 22, and `B-06` (production image) at
+  Sessions 23–24 — all three predate this tag. This release note
+  originally miscounted them as still open at tag time; corrected
+  2026-08-19 after a staleness audit against real commit history.
+  `B-07`/`B-08` are already closed (Session 24).
 
 ### Migration notes
 This is the first tagged release — there is no prior schema to migrate

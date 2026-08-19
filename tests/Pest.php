@@ -1,7 +1,7 @@
 <?php
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\RefreshesDatabaseAsOwner;
 use Tests\TestCase;
 
-uses(TestCase::class, RefreshDatabase::class)->in('Feature');
-uses(TestCase::class, RefreshDatabase::class)->in('Browser');
+uses(TestCase::class, RefreshesDatabaseAsOwner::class)->in('Feature');
+uses(TestCase::class, RefreshesDatabaseAsOwner::class)->in('Browser');

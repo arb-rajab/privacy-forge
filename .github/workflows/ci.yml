@@ -105,11 +105,22 @@ jobs:
         run: composer analyse
 
       - name: Run migrations (test database)
-        run: php artisan migrate --force
+        # R-01 (docs/project-memory/10-risk-register.md): must run as the
+        # schema-owning role, not the app's restricted runtime role — this
+        # migration creates that runtime role and revokes UPDATE/DELETE
+        # on audit_log_entries from it, which only works from a different,
+        # owning connection (config/database.php's `pgsql_migrate`).
+        # DB_MIGRATE_USERNAME/PASSWORD here are this job's real Postgres
+        # service superuser (POSTGRES_USER/PASSWORD above), not a
+        # different credential — DB_PASSWORD is the *app* runtime role's
+        # password, reused unchanged by the later test step below.
+        run: php artisan migrate --force --database=pgsql_migrate
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: privacy_forge_test
           DB_PASSWORD: privacy_forge_ci
+          DB_MIGRATE_USERNAME: privacy_forge
+          DB_MIGRATE_PASSWORD: privacy_forge_ci
           REDIS_HOST: 127.0.0.1
 
       - name: Run tests (Pest)
@@ -193,11 +204,15 @@ jobs:
         run: php artisan key:generate
 
       - name: Run migrations (test database)
-        run: php artisan migrate --force
+        # R-01: see the php-quality job's matching step for why this must
+        # run via the owning `pgsql_migrate` connection.
+        run: php artisan migrate --force --database=pgsql_migrate
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: privacy_forge_test
           DB_PASSWORD: privacy_forge_ci
+          DB_MIGRATE_USERNAME: privacy_forge
+          DB_MIGRATE_PASSWORD: privacy_forge_ci
 
       - name: Run end-to-end tests (Pest Browser Testing)
         run: composer test:e2e

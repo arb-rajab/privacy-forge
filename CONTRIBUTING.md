@@ -52,8 +52,15 @@ Once containers are healthy:
 
 ```bash
 docker compose exec app php artisan key:generate
-docker compose exec app php artisan migrate
+docker compose exec app php artisan migrate --database=pgsql_migrate
 ```
+
+R-01 (`docs/project-memory/10-risk-register.md`): `--database=pgsql_migrate` runs
+migrations as the schema-owning role, not the app's restricted runtime role —
+migrations create/alter tables and set up the audit-log grant restriction itself,
+neither of which the runtime role is allowed to do. Everything else (`artisan
+tinker`, the app/worker containers, `demo:reset`'s non-audit-log truncation, etc.)
+uses the default connection, the real runtime role.
 
 The application is then available at `http://localhost:8000`, and the Vite
 dev server (for frontend hot-reload) at `http://localhost:5173`.

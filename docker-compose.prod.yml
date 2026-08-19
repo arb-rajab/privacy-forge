@@ -114,6 +114,13 @@ services:
       redis:
         condition: service_healthy
 
+  # R-01 (docs/project-memory/10-risk-register.md): same split as
+  # docker-compose.yml — POSTGRES_USER is the schema owner only, `app`/
+  # `worker` above connect as a second, non-owning role (`.env`'s
+  # DB_USERNAME/PASSWORD) that has UPDATE/DELETE genuinely revoked on
+  # audit_log_entries. A real deployment must generate its own distinct
+  # DB_MIGRATE_*/DB_USERNAME credentials, never reuse these placeholders
+  # (same rule as every other secret in this file, per the header above).
   postgres:
     image: postgres:16-alpine
     environment:

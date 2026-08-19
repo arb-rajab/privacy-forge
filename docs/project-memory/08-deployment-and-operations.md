@@ -107,7 +107,9 @@ anything.
 actually deploys — a local, placeholder-backed proof, not a stub
 awaiting real infrastructure.** `docker compose -f docker-compose.prod.yml
 up -d --build`, then `docker compose -f docker-compose.prod.yml exec app
-php artisan migrate --force`, then (with `DEMO_MODE=true` set as a real
+php artisan migrate --force --database=pgsql_migrate` (R-01,
+`10-risk-register.md`: migrations must run as the schema-owning role, not
+the app's restricted runtime role), then (with `DEMO_MODE=true` set as a real
 container environment variable, not patched into a running container —
 see the OPcache finding in `09-decision-log.md`'s Session 24 entry for
 why that distinction matters) `php artisan demo:reset` to seed the
@@ -128,9 +130,10 @@ dev/placeholder values.
 
 ## Migration and rollback procedure
 
-Standard Laravel migrations (`php artisan migrate`) apply to any
-instance, including this local demo deployment, the same way they apply
-to a self-hoster's install — nothing demo-specific here. What *is*
+Standard Laravel migrations (`php artisan migrate --database=pgsql_migrate`,
+R-01) apply to any instance, including this local demo deployment, the
+same way they apply to a self-hoster's install — nothing demo-specific
+here. What *is*
 demo-specific and does not exist for a self-hoster: the demo's own
 "rollback" primitive is `php artisan demo:reset` (built Session 22,
 verified against a real running deployment Session 24), not a database

@@ -10,14 +10,25 @@ use Illuminate\Support\Facades\Storage;
 // Hash-chain half of ADR-0003 (docs/adr/ADR-0003-audit-log-tamper-evidence.md).
 // This is the *only* supported way to create an AuditLogEntry — it's what
 // computes prev_hash/entry_hash correctly. The DB-grant half of that ADR
-// (R-01) is not implemented here; see docs/project-memory/12-session-
-// handoff.md for why (the app's DB role also owns the audit_log_entries
-// table in the current docker-compose/CI setup, so a bare REVOKE would be
-// a no-op against that role). The periodic external anchor (R-04) *is*
-// implemented here — see anchorChain()/verifyAnchors() below.
+// (R-01) is now real (docs/project-memory/09-decision-log.md, Session
+// 26) — the app's runtime role has UPDATE/DELETE revoked on
+// audit_log_entries, which is exactly why record() below serializes
+// concurrent writers with an advisory lock instead of ->lockForUpdate():
+// Postgres requires the UPDATE privilege for SELECT ... FOR UPDATE *and*
+// FOR SHARE, even though neither issues an actual UPDATE — verified
+// empirically, not assumed. pg_advisory_xact_lock needs no table
+// privilege at all, so it still serializes "read the last hash, compute
+// the next one, insert" without needing a grant that would defeat the
+// whole point of this migration. The periodic external anchor (R-04) is
+// also implemented here — see anchorChain()/verifyAnchors() below.
 class AuditLogger
 {
     public const GENESIS_HASH_CHAR = '0';
+
+    // Arbitrary fixed key for pg_advisory_xact_lock — only its stability
+    // across calls matters, not its value. hashtext() keeps the source
+    // self-documenting instead of a bare magic number.
+    private const CHAIN_LOCK_KEY_SEED = 'privacy_forge:audit_log_chain';
 
     // R-04/ADR-0003: anchors live on the 's3' disk (the same external
     // object storage export bundles already use — no new infrastructure
@@ -52,7 +63,9 @@ class AuditLogger
         ?string $reasonCode = null,
     ): AuditLogEntry {
         return DB::transaction(function () use ($actorType, $actor, $action, $resourceType, $resourceId, $decision, $policyId, $reasonCode) {
-            $previous = AuditLogEntry::query()->orderByDesc('sequence')->lockForUpdate()->first();
+            DB::statement('SELECT pg_advisory_xact_lock(hashtext(?))', [self::CHAIN_LOCK_KEY_SEED]);
+
+            $previous = AuditLogEntry::query()->orderByDesc('sequence')->first();
             $prevHash = $previous === null ? self::genesisHash() : $previous->entry_hash;
 
             $payload = [

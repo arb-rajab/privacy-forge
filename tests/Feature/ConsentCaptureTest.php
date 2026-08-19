@@ -103,8 +103,21 @@ test('the audit log chain for consent actions verifies and detects tampering', f
     $logger = app(AuditLogger::class);
     expect($logger->verifyChain())->toBe(['valid' => true, 'brokenAtSequence' => null]);
 
+    // R-01: the app's own runtime connection can no longer UPDATE
+    // audit_log_entries at all (verified in
+    // tests/Feature/AuditLogGrantEnforcementTest.php) — this simulated
+    // tampering now has to go through the schema-owning connection,
+    // which is realistic anyway: the threat ADR-0003's hash chain
+    // defends against is someone with direct/elevated DB access, not the
+    // app's own restricted credential. That connection is a genuinely
+    // separate Postgres session, so the entries created above (via the
+    // default connection, inside RefreshDatabase's still-open
+    // transaction) must be committed first — otherwise they're invisible
+    // to it and the UPDATE below would silently match zero rows.
+    DB::commit();
+
     $entry = AuditLogEntry::query()->orderBy('sequence')->first();
-    DB::table('audit_log_entries')->where('id', $entry->id)->update(['action' => 'consent.capture.tampered']);
+    DB::connection('pgsql_migrate')->table('audit_log_entries')->where('id', $entry->id)->update(['action' => 'consent.capture.tampered']);
 
     $result = $logger->verifyChain();
     expect($result['valid'])->toBeFalse();

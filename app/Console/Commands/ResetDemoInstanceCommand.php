@@ -105,8 +105,18 @@ class ResetDemoInstanceCommand extends Command
         // wouldn't touch it. Reset that sequence explicitly instead, so a
         // fresh demo chain restarts at sequence 1 (genesis) like a truly
         // fresh instance, not an arbitrary large number.
-        DB::statement('TRUNCATE TABLE '.implode(', ', self::TABLES_TO_TRUNCATE));
-        DB::statement('ALTER SEQUENCE audit_log_entries_sequence_seq RESTART WITH 1');
+        //
+        // Runs via the `pgsql_migrate` (schema-owning) connection, not
+        // the app's normal default connection: since R-01 was closed for
+        // real (09-decision-log.md), the app's default runtime role has
+        // no TRUNCATE privilege on audit_log_entries — deliberately, the
+        // same protection that stops a normal request from tampering
+        // with it. This command is an explicit, DEMO_MODE-gated,
+        // destructive admin reset, not app traffic, so elevating to the
+        // owning connection here is a deliberate, documented exception,
+        // not a way around that protection.
+        DB::connection('pgsql_migrate')->statement('TRUNCATE TABLE '.implode(', ', self::TABLES_TO_TRUNCATE));
+        DB::connection('pgsql_migrate')->statement('ALTER SEQUENCE audit_log_entries_sequence_seq RESTART WITH 1');
 
         Artisan::call('db:seed', ['--class' => DatabaseSeeder::class, '--force' => true]);
         Artisan::call('connectors:register-reference');

@@ -82,7 +82,7 @@ cd privacy-forge
 cp .env.example .env
 docker compose up --build
 docker compose exec app php artisan key:generate
-docker compose exec app php artisan migrate
+docker compose exec app php artisan migrate --database=pgsql_migrate
 ```
 
 Then visit `http://localhost:8000`. See `CONTRIBUTING.md` for the full
