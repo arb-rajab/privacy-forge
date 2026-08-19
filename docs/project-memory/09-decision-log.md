@@ -1061,3 +1061,101 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   /api/v1/admin/audit-log` returning that login's own audit entries —
   the app runtime role's `SELECT`/`INSERT` path fully working, same
   standard as every other verified claim in this project.
+
+## R-01 re-examined: two gaps Session 27's "Closed" status hadn't actually verified, both real, both fixed (Session 28, 2026-08-19)
+
+- **Prompted by an external review that asked two specific, pointed
+  questions before accepting R-01 as genuinely closed** rather than
+  closed on the strength of the grant-enforcement test alone: does the
+  advisory lock actually serialize concurrent writers (not just
+  sequential ones), and are the migrate role's credentials actually
+  absent from `app`/`worker`'s runtime environment, not merely unused by
+  them. Both turned out to be real, unverified gaps — recorded here
+  plainly rather than folded silently into the existing "Closed" entry.
+- **Concurrency was never tested.** `CHAIN_LOCK_KEY_SEED` is one fixed,
+  global string — confirmed by reading `app/Services/AuditLogger.php`
+  directly, not assumed — so every write contends for the same
+  `pg_advisory_xact_lock` key regardless of actor or resource; there was
+  no partitioning to reason about. But nothing had ever actually fired
+  concurrent writes against it. Added
+  `tests/Feature/AuditLogConcurrencyTest.php`, forking 8 real child
+  processes (`pcntl_fork`) that each open an independent Postgres
+  connection and call `AuditLogger::record()` at genuinely the same
+  time, then asserts the resulting chain is gapless and unforked and
+  that `verifyChain()` still passes. Checked both directions before
+  trusting it: passes with the lock in place; reliably fails (a forked
+  `prev_hash`) when the lock is temporarily disabled and the race window
+  widened with `usleep` — the fix reverted immediately after confirming
+  the failure. Writing the test surfaced a real, separate pitfall worth
+  recording for its own sake: naively disconnecting or `exit()`-ing a
+  forked child that inherited a shared PDO connection reliably killed
+  the *parent's* connection too ("server closed the connection
+  unexpectedly"), because both a Laravel-level `disconnect()`/`purge()`
+  and PHP's normal end-of-request object-destruction sweep trigger a
+  real libpq `PQfinish()` — an actual protocol message — over what is,
+  at the kernel level, the same duplicated TCP connection every forked
+  copy shares. The fix: leave the inherited connection entirely
+  untouched in each child, write through a separately-named fresh
+  connection, and terminate each child via `posix_kill(SIGKILL)` instead
+  of `exit()`, since only a raw signal skips PHP's destructor sweep.
+  CI's `php-quality` job now installs `pcntl`/`posix` accordingly.
+- **The migrate role's credentials were genuinely reachable from
+  `app`/`worker`, in both compose files, confirmed by inspecting the
+  actual running containers rather than the source alone.**
+  `docker exec privacy-forge-prod-app-1 printenv` (and the same for
+  `-worker-1`) showed `DB_MIGRATE_USERNAME`/`PASSWORD` sitting in both
+  services' real process environment — a direct consequence of
+  `docker-compose.prod.yml`'s `env_file: .env` loading a `.env` that, at
+  the time, held those credentials. `config/database.php`'s own comment
+  ("never used by the running application itself") was true of *usage*
+  but not of *exposure* — a compromised app/worker process didn't need
+  the app to ever call `pgsql_migrate` itself; it only needed to read
+  its own environment. Dev had the same exposure through a different
+  mechanism: `docker-compose.yml` bind-mounts the whole repo, so `.env`
+  sat readable on disk inside `app`/`worker`, and Laravel's own dotenv
+  loading made `env('DB_MIGRATE_USERNAME')` return the real value from
+  any code path in that process — confirmed via `php artisan tinker`,
+  not assumed from the bind mount alone.
+- **Fix:** split the owning role's credentials into a new
+  `.env.migrate` (gitignored; `.env.migrate.example` committed), loaded
+  by neither `app` nor `worker` in either compose file, and added a
+  one-shot, profile-gated `migrate` Compose service — the only place
+  `.env.migrate` is ever loaded — replacing every prior `docker compose
+  exec app ...` invocation of `php artisan migrate --database=
+  pgsql_migrate`, `php artisan demo:reset` (`ResetDemoInstanceCommand`'s
+  pre-existing, DEMO_MODE-gated runtime use of the owning role for its
+  `TRUNCATE` — not something this session introduced, but now run the
+  same isolated way), and `composer test` (Pest's `RefreshDatabase` also
+  needs the owning role for `migrate:fresh`). README/CONTRIBUTING/the
+  deployment doc updated to match.
+- **Re-verified concretely, not re-asserted:** `docker exec` on the
+  *recreated* `privacy-forge-prod-app-1`/`-worker-1` containers shows no
+  `DB_MIGRATE_*` in their real environment; the dev `app` container's
+  own bind-mounted `.env` no longer contains those credentials either.
+  The one-shot `migrate` service was run for real against the live prod
+  stack (idempotent `migrate --database=pgsql_migrate --force`,
+  correctly reporting "Nothing to migrate") and, separately, both
+  `migrate` and `demo:reset` were run for real against a fresh,
+  isolated, throwaway stack (its own volumes, no shared state with the
+  real dev/demo data) specifically so proving this didn't require
+  destructively truncating anything real — that throwaway stack was
+  torn down afterward.
+- **One real regression this restructuring caused, found and fixed
+  before trusting the result, not glossed over:** routing `composer
+  test` through the new one-shot service via `env_file: .env` initially
+  broke CSRF handling in 67 tests (419 instead of the expected 2xx).
+  Root cause: Docker's `env_file` sets real OS environment variables
+  before PHP starts, and dotenv's default immutable mode refuses to
+  override an already-set real var — so `.env`'s `APP_ENV=local` beat
+  `phpunit.xml.dist`'s `<env name="APP_ENV" value="testing"/>` override,
+  silently disabling the test-only CSRF bypass. Fixed by having the dev
+  `migrate` service load only `.env.migrate` via `env_file` — matching
+  how `app`/`worker` already worked, relying on Laravel's own dotenv
+  reading the bind-mounted `.env` rather than Docker-level injection.
+  Confirmed by re-running the full suite clean afterward: 192/192
+  (191 previously reported, plus the new concurrency test), Pint clean,
+  Larastan level 8 clean.
+- R-01's risk-register entry (`10-risk-register.md`) is updated in
+  place with both findings and the fix rather than reopened as a new
+  risk ID — the underlying risk and its owning decision are unchanged;
+  what changed is how completely "Closed" had actually been verified.

@@ -79,7 +79,13 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: pdo, pdo_pgsql, redis, zip
+          # pcntl/posix: tests/Feature/AuditLogConcurrencyTest.php (R-01)
+          # forks real OS processes to prove pg_advisory_xact_lock
+          # serializes genuinely concurrent audit-log writers, not just
+          # sequential calls within one PHP process; posix_kill is how
+          # each forked child terminates without corrupting the parent's
+          # inherited database connection (see that test's own comments).
+          extensions: pdo, pdo_pgsql, redis, zip, pcntl, posix
           coverage: xdebug
 
       - name: Cache Composer dependencies

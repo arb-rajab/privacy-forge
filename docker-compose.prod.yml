@@ -114,6 +114,40 @@ services:
       redis:
         condition: service_healthy
 
+  # R-01 (docs/project-memory/10-risk-register.md): one-shot container for
+  # anything that must authenticate as the schema-owning role
+  # (DB_MIGRATE_USERNAME/PASSWORD, .env.migrate) — `php artisan migrate
+  # --database=pgsql_migrate` and `php artisan demo:reset` (whose TRUNCATE
+  # needs privileges the app's runtime role deliberately lacks). `app`/
+  # `worker` above load `env_file: .env` alone (no .env.migrate), so the
+  # owning role's credentials are never present in either long-running
+  # service's environment — confirmed via `docker exec ... printenv`, not
+  # merely assumed (docs/project-memory/09-decision-log.md). `entrypoint`
+  # is cleared (the base image's is `docker/entrypoint.prod.sh`, which
+  # runs `config:cache`/`view:cache` before execing its command — needed
+  # for the long-running `app`/`web` services, pointless overhead for a
+  # one-shot artisan call) so the given command runs directly. No fixed
+  # command — pass the full command each time. Behind a Compose profile
+  # so `docker compose up` never starts it, e.g.:
+  #   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate php artisan migrate --database=pgsql_migrate --force
+  #   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate php artisan demo:reset
+  migrate:
+    profiles: ["migrate"]
+    image: privacy-forge-app-prod:latest
+    entrypoint: []
+    env_file:
+      - .env
+      - .env.migrate
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # R-01 (docs/project-memory/10-risk-register.md): same split as
   # docker-compose.yml — POSTGRES_USER is the schema owner only, `app`/
   # `worker` above connect as a second, non-owning role (`.env`'s

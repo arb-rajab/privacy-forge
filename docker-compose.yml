@@ -126,12 +126,66 @@ services:
       minio:
         condition: service_healthy
 
+  # R-01 (docs/project-memory/10-risk-register.md): one-shot container for
+  # anything that must authenticate as the schema-owning role
+  # (DB_MIGRATE_USERNAME/PASSWORD, .env.migrate) — `php artisan migrate
+  # --database=pgsql_migrate`, `php artisan demo:reset` (whose TRUNCATE
+  # needs privileges the app's runtime role deliberately lacks), and
+  # `composer test` (Pest's RefreshDatabase runs `migrate:fresh` via the
+  # same owning connection — tests/Concerns/RefreshesDatabaseAsOwner.php).
+  # Deliberately does NOT `env_file: .env` (unlike `app`/`worker` below,
+  # which don't either — they let Laravel's own dotenv read `.env` off
+  # the bind mount at boot). Found the hard way: Docker's `env_file`
+  # injects every key as a *real* OS environment variable before PHP even
+  # starts, and dotenv's default immutable mode refuses to override an
+  # already-set real var — so phpunit.xml.dist's `<env name="APP_ENV"
+  # value="testing"/>` (and its SESSION_DRIVER/CACHE_STORE overrides)
+  # would have silently lost to `.env`'s real values, leaving CSRF's
+  # `runningUnitTests()` bypass off and every state-changing test request
+  # failing with 419. Confirmed by direct comparison, not assumed — a run
+  # through this container without this fix reliably failed CSRF-gated
+  # tests that passed cleanly when run any other way. `.env.migrate` is
+  # loaded via `env_file` regardless, since PHPUnit never overrides
+  # DB_MIGRATE_USERNAME/PASSWORD, so there's no such conflict for those.
+  # Loading .env.migrate here, and *only* here, is the entire point:
+  # `app`/`worker` never load it, so the owning role's credentials are
+  # never present in either long-running process's environment for a
+  # compromised app/worker to read back out and reconnect as — this is
+  # also why tests now run here instead of via `docker compose exec app
+  # composer test`, which would require `app` itself to have those
+  # credentials just to make `exec` work. No fixed entrypoint/command —
+  # pass the full command each time. Behind a Compose profile so `docker
+  # compose up` never starts it, e.g.:
+  #   docker compose --profile migrate run --rm migrate php artisan migrate --database=pgsql_migrate
+  #   docker compose --profile migrate run --rm migrate php artisan demo:reset
+  #   docker compose --profile migrate run --rm migrate composer test
+  migrate:
+    profiles: ["migrate"]
+    image: privacy-forge-app:latest
+    env_file:
+      - .env.migrate
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - AWS_ENDPOINT=http://minio:9000
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/vendor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
   # R-01 (docs/project-memory/10-risk-register.md): POSTGRES_USER here is
   # the schema-owning role only — config/database.php's `pgsql_migrate`
-  # connection (DB_MIGRATE_USERNAME/PASSWORD in .env) is what `php artisan
-  # migrate` actually authenticates as. The app/worker containers below
-  # connect as a second, genuinely non-owning role (DB_USERNAME/PASSWORD
-  # in .env, default `privacy_forge_app`) created by this repo's
+  # connection (DB_MIGRATE_USERNAME/PASSWORD, loaded only by the `migrate`
+  # service above via .env.migrate) is what `php artisan migrate` actually
+  # authenticates as. The app/worker containers below connect as a
+  # second, genuinely non-owning role (DB_USERNAME/PASSWORD in .env,
+  # default `privacy_forge_app`) created by this repo's
   # add_restricted_runtime_role_for_audit_log migration the first time
   # `migrate` runs against a given Postgres instance — not provisioned
   # here via a docker-entrypoint-initdb.d script, since that only runs

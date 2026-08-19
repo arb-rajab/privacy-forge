@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.migrate.example
 
 # Dependencies
 # NOTE: composer.lock and package-lock.json are intentionally NOT ignored —

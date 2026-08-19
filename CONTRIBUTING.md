@@ -52,15 +52,24 @@ Once containers are healthy:
 
 ```bash
 docker compose exec app php artisan key:generate
-docker compose exec app php artisan migrate --database=pgsql_migrate
+cp .env.migrate.example .env.migrate
+docker compose --profile migrate run --rm migrate php artisan migrate --database=pgsql_migrate
 ```
 
 R-01 (`docs/project-memory/10-risk-register.md`): `--database=pgsql_migrate` runs
 migrations as the schema-owning role, not the app's restricted runtime role —
 migrations create/alter tables and set up the audit-log grant restriction itself,
-neither of which the runtime role is allowed to do. Everything else (`artisan
-tinker`, the app/worker containers, `demo:reset`'s non-audit-log truncation, etc.)
-uses the default connection, the real runtime role.
+neither of which the runtime role is allowed to do. That owning role's
+credentials live only in `.env.migrate`, loaded only by the one-shot `migrate`
+service above — never by the long-running `app`/`worker` containers, which load
+`env_file: .env` alone. Running it via `docker compose exec app ...` instead
+would defeat the point: `app`'s already-running process would need the owning
+credentials in its own environment for `exec` to work, exactly what this split
+exists to avoid. Everything else (`artisan tinker`, the app/worker containers,
+normal request handling, etc.) uses the default connection, the real runtime
+role. The one documented exception is `demo:reset`'s TRUNCATE step, which also
+needs the owning role (DEMO_MODE-gated, destructive by design) — run it the
+same way: `docker compose --profile migrate run --rm migrate php artisan demo:reset`.
 
 The application is then available at `http://localhost:8000`, and the Vite
 dev server (for frontend hot-reload) at `http://localhost:5173`.
@@ -71,11 +80,18 @@ doesn't, `docker compose logs app` is the first place to look.
 **Running tests, lint, and static analysis locally** (matches CI exactly):
 
 ```bash
-docker compose exec app composer test      # Pest
-docker compose exec app composer lint      # Pint (add --fix to auto-fix)
-docker compose exec app composer analyse   # Larastan / PHPStan, level 8
+docker compose --profile migrate run --rm migrate composer test  # Pest
+docker compose exec app composer lint                            # Pint (add --fix to auto-fix)
+docker compose exec app composer analyse                         # Larastan / PHPStan, level 8
 docker compose exec frontend npm run lint
 ```
+
+`composer test` runs via the one-shot `migrate` service, not `docker compose
+exec app`: Pest's `RefreshDatabase` (`tests/Concerns/RefreshesDatabaseAsOwner.php`)
+runs `migrate:fresh --database=pgsql_migrate` before the suite, which needs the
+schema-owning role's credentials (`.env.migrate`) — credentials `app` itself
+deliberately never has (R-01, above). `lint`/`analyse` touch no database, so
+`exec app` is fine for those.
 
 **Pest Browser Testing** (`tests/Browser/`, the consent widget + DSAR portal
 E2E suite) needs Node.js, npm, and a real downloaded Chromium — tooling the

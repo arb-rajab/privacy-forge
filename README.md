@@ -80,9 +80,10 @@ phase-by-phase evidence map.
 git clone https://github.com/arb-rajab/privacy-forge.git
 cd privacy-forge
 cp .env.example .env
+cp .env.migrate.example .env.migrate
 docker compose up --build
 docker compose exec app php artisan key:generate
-docker compose exec app php artisan migrate --database=pgsql_migrate
+docker compose --profile migrate run --rm migrate php artisan migrate --database=pgsql_migrate
 ```
 
 Then visit `http://localhost:8000`. See `CONTRIBUTING.md` for the full

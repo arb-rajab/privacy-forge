@@ -106,13 +106,18 @@ anything.
 **Status: this is the real, complete procedure for what this project
 actually deploys — a local, placeholder-backed proof, not a stub
 awaiting real infrastructure.** `docker compose -f docker-compose.prod.yml
-up -d --build`, then `docker compose -f docker-compose.prod.yml exec app
-php artisan migrate --force --database=pgsql_migrate` (R-01,
-`10-risk-register.md`: migrations must run as the schema-owning role, not
-the app's restricted runtime role), then (with `DEMO_MODE=true` set as a real
+up -d --build`, then `docker compose -f docker-compose.prod.yml --profile
+migrate run --rm migrate php artisan migrate --force --database=pgsql_migrate`
+(R-01, `10-risk-register.md`: migrations must run as the schema-owning role,
+not the app's restricted runtime role — via the one-shot `migrate` service,
+which is the only place `.env.migrate`'s owning-role credentials are ever
+loaded; `app`/`worker` never see them, confirmed by inspecting their real
+running environment), then (with `DEMO_MODE=true` set as a real
 container environment variable, not patched into a running container —
 see the OPcache finding in `09-decision-log.md`'s Session 24 entry for
-why that distinction matters) `php artisan demo:reset` to seed the
+why that distinction matters) `docker compose -f docker-compose.prod.yml
+--profile migrate run --rm migrate php artisan demo:reset` (same one-shot
+service — `demo:reset`'s TRUNCATE also needs the owning role) to seed the
 baseline and the fixed demo-viewer account. Reachable at
 `https://demo.privacy-forge.example:8443` locally (`--resolve` or a
 `/etc/hosts` entry needed, since no real DNS exists for a fake domain).
@@ -131,14 +136,15 @@ dev/placeholder values.
 ## Migration and rollback procedure
 
 Standard Laravel migrations (`php artisan migrate --database=pgsql_migrate`,
-R-01) apply to any instance, including this local demo deployment, the
-same way they apply to a self-hoster's install — nothing demo-specific
-here. What *is*
+R-01, run via the one-shot `migrate` Compose service — see above) apply to
+any instance, including this local demo deployment, the same way they
+apply to a self-hoster's install — nothing demo-specific here. What *is*
 demo-specific and does not exist for a self-hoster: the demo's own
 "rollback" primitive is `php artisan demo:reset` (built Session 22,
-verified against a real running deployment Session 24), not a database
-restore. A demo instance is never expected to hold state worth
-restoring; a bad reset just runs again.
+verified against a real running deployment Session 24; run via the same
+one-shot `migrate` service, since its TRUNCATE also needs the owning
+role), not a database restore. A demo instance is never expected to hold
+state worth restoring; a bad reset just runs again.
 
 ## Configuration and secrets
 
@@ -206,7 +212,7 @@ spend and no cap to alert on, by decision, not by oversight.
 | Runbook | Status |
 |---|---|
 | Scheduled demo reset | **Verified working, Session 24**, against the real local production-shape deployment: `php artisan demo:reset` (`config('demo.enabled')`-gated) genuinely wipes real data entered after a prior reset and re-seeds the baseline plus the fixed demo-viewer account. Scheduled via `routes/console.php` + `DEMO_RESET_SCHEDULE`. Never run by an actual long-lived cron scheduler against a persistently-running instance — there is no such instance, by decision — only invoked directly each time it's been verified. |
-| Manual/emergency demo reset | Same command, run on demand: `php artisan demo:reset` (refuses unless `DEMO_MODE=true`, see `ResetDemoInstanceCommand`'s class comment). |
+| Manual/emergency demo reset | Same command, run on demand via the one-shot `migrate` service (R-01): `docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate php artisan demo:reset` (refuses unless `DEMO_MODE=true`, see `ResetDemoInstanceCommand`'s class comment). Not `docker compose exec app ...` — `app` never has the owning-role credentials `demo:reset`'s TRUNCATE needs. |
 | Chain verification | Already exists (`php artisan audit:verify-chain`, ADR-0003) — applies to this local deployment the same as any other. |
 | Rotate the demo-viewer credential | `DEMO_VIEWER_EMAIL`/`DEMO_VIEWER_PASSWORD` (`.env.example`) — change either and re-run `demo:reset` (or recreate the container so the new values are actually picked up — see the OPcache note in `09-decision-log.md`'s Session 24 entry). Deliberately not a "leaked secret" runbook in the real-incident sense, since Demo Instance Data Safety control 5 (real isolation) is not-applicable here — there is no real public exposure for a leak to matter against. |
 | Full demo instance teardown/redeploy | `docker compose -f docker-compose.prod.yml -p privacy-forge-prod down -v && docker compose -f docker-compose.prod.yml -p privacy-forge-prod up -d --build` — verified this session as part of proving the stack from a clean state. Nothing beyond this exists or is needed, since there is no real hosting target this maps onto. |
