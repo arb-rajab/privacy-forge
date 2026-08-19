@@ -112,19 +112,18 @@ fixed — full accounts in `docs/CASE-STUDY.md`:
 ### Known debt going into v1.0.0 (stated plainly, not silently carried)
 This release closes R-02 through R-06 for real (see "Fixed"/"Added"
 above and `docs/CASE-STUDY.md`) and formally accepts R-08 as a residual
-risk. It does **not** close everything — the following remain open,
+risk. **`R-07`** (Dockerfile cold-clone rebuild time) was still an open,
+composed-estimate-only figure at tag time; it is now genuinely closed
+as of 2026-08-19 — a real, unbroken, from-true-zero clean rebuild
+measured **423 seconds (~7.1 minutes)**, with the full test suite
+(187/187) passing against that exact freshly-built image, comfortably
+under the 900-second budget (see `10-risk-register.md`'s R-07 entry
+for the full account, including three earlier attempts that failed on
+transient host network issues, reported honestly rather than hidden).
+It does **not** close everything — the following remain open,
 tracked, and non-blocking by explicit decision, not by omission:
 - **`R-01`** — DB-level grant revocation gap on the audit log, open
   since it was filed; see "Not included" above.
-- **`R-07`** — the Dockerfile cold-clone rebuild's GitHub rate-limit
-  block was re-checked on 2026-08-18 (the same day as this tag) and has
-  now cleared (`codeload.github.com` returns `200`, not `429`). Per
-  R-07's own follow-up trigger, this means the final clean-build
-  re-verification it was waiting on is now actionable — and has **not
-  yet been run**. The 643s+73s≈716s composed estimate (`10-risk-register.md`)
-  remains a composed estimate, not a single atomic measurement, until
-  that rebuild happens. This is genuinely overdue action, not future
-  work: it was unblocked on tag day and still hasn't been done.
 - **`B-01`–`B-06`** — six open backlog items (full-instance archival
   export, a retention-policy uniqueness race, a weekly `osv-scanner`
   re-run trigger, `GET /admin/audit-log`'s spec/implementation drift,
