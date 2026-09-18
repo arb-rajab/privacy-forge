@@ -1258,3 +1258,32 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   `v1.0.0-pending` despite `v1.0.0` having been a real tag since Session
   25, with Sessions 26–28 already shipped on top of it — fixed to state
   the tag and that later sessions closed further debt on top of it.
+- **A third, previously-invisible bug, found only once the first two
+  fixes actually let tests run:** with the `DB_MIGRATE_*` fix in place,
+  `php-quality`'s real CI run went from 6 passed/186 failed to 190
+  passed/2 failed — both failures in `DemoModeSharedPropTest`, "Not a
+  valid Inertia response." Root cause: it's the only Feature test that
+  does a real `$this->get()` on a page route (every other Feature test
+  hits `routes/api.php`'s JSON endpoints, never touching the Blade root
+  view). `php-quality` has never run `npm run build` — only `e2e` does,
+  because Browser tests need real built assets in an actual browser —
+  so `app.blade.php`'s `@vite()` throws on a missing `public/build/
+  manifest.json`. Present since the test was added at Session 22, and
+  simply never visible in CI before: every test was already failing on
+  the `DB_MIGRATE_*` issue, so this second, independent bug had no
+  chance to surface until that one was fixed. Fixed with Laravel's own
+  `withoutVite()` test helper, scoped to just this file via a Pest
+  `beforeEach` — not `TestCase`-wide, since Browser tests share the same
+  `TestCase` and genuinely need real Vite output to render in a browser.
+- **Final, real-CI-run-confirmed outcome, not inferred:** opened as PR
+  #1 specifically to get genuine GitHub Actions runs rather than trust
+  local testing (itself proven necessary by the npm 12.0.2→11.5.0
+  correction above). After all three fixes (`DB_MIGRATE_*` env vars,
+  the npm/vite/vitest CVE + toolchain fixes, and `withoutVite()`), the
+  PR's head commit (`68e4fc5`) shows **all 9 checks green**: PHP
+  lint/Larastan/Pest, E2E (Pest Browser Testing), osv-scanner, CodeQL,
+  gitleaks, OpenAPI validation, JS lint/build, and the framework-version
+  governance check. `mergeable_state: clean`. This is the first
+  genuinely green CI run on this repository since Session 26 at the
+  latest (every run checked back to Session 18 had at least one red
+  job) — see PR #1 for the live check-run links.

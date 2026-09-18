@@ -10,8 +10,8 @@
 
 ## Session completed
 - Session number and title: **Session 29 — CI found genuinely red on
-  `main`; two unrelated root causes fixed, README status line
-  corrected.**
+  `main`; three root causes fixed (two pre-existing, one only
+  surfaced by fixing the first), README status line corrected.**
 - Objective: an external audit checked the GitHub Actions tab directly
   (not commit messages) and found three jobs failing on every run since
   Session 27: `php-quality` (Pest), `e2e` (Pest Browser Testing), and
@@ -20,10 +20,15 @@
   Root-cause each failure separately, fix what's fixable for real (no
   suppressing/skipping checks), and correct the stale README status
   line while here.
-- Status: **Both root causes diagnosed and fixed; the fix is pushed and
-  the real GitHub Actions run is the verification of record** (see
-  "Validation performed" below for exactly what could and could not be
-  verified locally in this session's sandboxed environment).
+- Status: **DONE — confirmed via a real GitHub Actions run, not
+  inference.** Opened as PR #1 specifically to get genuine CI runs
+  rather than trust local testing (itself proven necessary — see "Root
+  cause 2" below for a fix this session got wrong on the first local
+  pass, and only the real CI run caught). After three rounds of
+  fix-and-push, **PR #1's head commit (`68e4fc5`) shows all 9 CI checks
+  green** and `mergeable_state: clean`. This is the first fully green
+  CI run on this repository since at least Session 18 (every run
+  checked back that far had at least one red job).
 
 ## Root cause 1: Pest + E2E — a CI-workflow gap dating back to Session 27, not a regression introduced this session
 
@@ -114,6 +119,23 @@ looked fully verified locally still carried one wrong assumption, and
 only the real CI run surfaced it — exactly the standard this whole
 session was about applying to the rest of the repo.
 
+## Root cause 3: a third bug, invisible until the first fix let tests actually run
+
+With `DB_MIGRATE_*` fixed, `php-quality`'s real CI run went from 6
+passed/186 failed to **190 passed/2 failed** — both failures in
+`Tests\Feature\DemoModeSharedPropTest`, "Not a valid Inertia response."
+It's the only Feature test that does a real `$this->get()` on a page
+route (every other Feature test hits `routes/api.php`'s JSON endpoints,
+never touching the Blade root view). `php-quality` has never run `npm
+run build` — only `e2e` does, since Browser tests need real built
+assets in an actual browser — so `app.blade.php`'s `@vite()` throws on
+a missing `public/build/manifest.json`. Present since the test was
+added at Session 22; never visible before because every test was
+already failing on the `DB_MIGRATE_*` issue. Fixed with Laravel's
+`withoutVite()` test helper, scoped to just that file via a Pest
+`beforeEach` (not `TestCase`-wide — Browser tests share the same
+`TestCase` and genuinely need real Vite output).
+
 ## What was explicitly NOT done this session, and why
 
 1. **No check skipped, disabled, or weakened to force green.** Both
@@ -145,13 +167,15 @@ session was about applying to the rest of the repo.
   the full diagnosis above, including exact error signatures and how
   each was confirmed.
 - `docs/project-memory/12-session-handoff.md` — this file.
+- `tests/Feature/DemoModeSharedPropTest.php` — `withoutVite()` added
+  (Root cause 3, above).
 
 ## Validation performed
 
 - **Root cause confirmed against real GitHub Actions job logs**, not
   inferred: pulled and read the actual failing steps' output for the
-  latest run and for Session 27/28's own runs, for all three failing
-  jobs.
+  latest run and for Session 27/28's own runs, for all three originally
+  failing jobs, and for each subsequent PR #1 run after every push.
 - **npm/osv-scanner side fully verified locally, including a
   self-correction:** `npm ci` (matching what CI runs), `npm run build`
   (Vite 6, both configs), `npm run lint` (ESLint), and `npm audit` (0
@@ -160,27 +184,34 @@ session was about applying to the rest of the repo.
   npm 12.0.2 combination this session first verified against and had
   to correct after the real PR run failed on it (see "Root cause 2"
   above).
-- **Pest/E2E side: root cause confirmed against real Postgres, fix not
-  locally re-run end-to-end.** Reproduced the exact `pgsql_migrate`
-  auth failure locally against a real Postgres 16 instance configured
-  to match CI's service container. `composer install` itself could not
-  complete in this session's sandboxed environment — GitHub API
+- **Pest/E2E/withoutVite fixes: not locally re-run end-to-end, but
+  confirmed by the real PR CI run.** `composer install` itself could
+  not complete in this session's sandboxed environment — GitHub API
   rate-limiting and intermittent proxy resets on `api.github.com`
   unrelated to this repository, confirmed via the proxy's own status
-  endpoint, not a code problem. **This session's actual verification of
-  the Pest/E2E fix is therefore the real GitHub Actions run on the
-  pushed commit, not a local Pest run** — stated plainly rather than
-  claimed as locally tested when it wasn't. Check the Actions tab on
-  the pushed commit before trusting this fix further.
+  endpoint. Root cause was reproduced locally against a real Postgres
+  16 instance before writing the fix, but the fix itself was verified
+  by pushing to PR #1 and reading the real Actions run — three rounds
+  total (DB_MIGRATE_* fix → npm version correction → withoutVite fix),
+  each one driven by what the previous real run actually showed, not
+  by assuming the previous fix worked.
+- **Final state, confirmed on PR #1's head commit `68e4fc5`: all 9 CI
+  checks green** (PHP lint/Larastan/Pest, E2E/Pest Browser Testing,
+  osv-scanner, CodeQL, gitleaks, OpenAPI validation, JS lint/build,
+  framework-version governance), `mergeable_state: clean`. Not
+  inferred — read directly from the PR's check-run API after each push.
 
 ## Open questions and risks
 
-- **Pest/E2E CI fix** — root cause identified and fixed with high
-  confidence (two missing environment variables, directly matching a
-  working pattern already present in the same file); final
-  confirmation is the real CI run, not inference.
-- **osv-scanner** — fixed and locally verified (`npm audit`: 0
-  vulnerabilities); final confirmation is the real `osv-scanner` run.
+- **Pest/E2E/osv-scanner/withoutVite fixes** — all four confirmed via a
+  real, fully green GitHub Actions run on PR #1 (`68e4fc5`), not
+  inference. Nothing left open on the CI-red investigation itself.
+- **Whether/how to land PR #1** — this repo's established convention
+  (41 prior commits) is direct-to-main, no PRs; PR #1 was opened this
+  session specifically to get real CI runs rather than push blind to
+  `main`. Merging it, or replicating its commits directly to `main` and
+  closing it unmerged, is a decision for whoever owns this repo — not
+  made unilaterally this session.
 - **B-01, B-02, B-03** — unchanged, still open.
 - **R-07, R-08** — unchanged.
 - **New standing risk worth naming:** nothing in this project's process
