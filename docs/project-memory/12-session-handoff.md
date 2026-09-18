@@ -92,15 +92,27 @@ real `osv-scanner` run are both required to consider this genuinely
 closed — see "Validation performed."
 
 **One more real bug found while verifying this, unrelated to the CVEs
-themselves:** Node 20's bundled npm 10.9.7 has a genuine arborist crash
+themselves:** Node 20's bundled npm has a genuine arborist crash
 (`TypeError: Cannot read properties of null (reading 'edgesOut')` in
 `#loadPeerSet`) resolving `vitest@4.1.11`'s peer graph — reproduced in
 complete isolation (a bare `npm install vitest@4.1.11`, nothing else in
-the project), confirmed fixed under npm 12.0.2. `ci.yml`'s `js-quality`
-and `e2e` jobs now pin `npm install -g npm@12.0.2` right after
-`actions/setup-node`, before `npm ci`; `package-lock.json` was
-regenerated and verified under that same npm version so CI reproduces
-what was actually tested.
+the project). **This session's own first attempt at fixing it was
+wrong, and the real PR CI run — not local testing — is what caught
+it:** pinned npm 12.0.2, verified locally (but against Node 22, this
+sandbox's own default, not CI's actual Node 20), pushed as PR #1
+specifically to get a real run instead of trusting that. The first
+`js-quality` run failed immediately: npm 12.x requires Node >=22
+(`EBADENGINE`) and CI stays on Node 20, so the fix never even reached
+the bug it was meant to fix. Re-tested against Node 20 itself (present
+locally at a separate path) and confirmed npm 11.5.0 — the highest
+11.x release still declaring Node 20.17+ support — fixes the arborist
+crash and installs cleanly there. `ci.yml`'s `js-quality` and `e2e`
+jobs now pin `npm install -g npm@11.5.0`; `package-lock.json` was
+regenerated and verified under that exact Node 20 + npm 11.5.0
+combination. Kept as an explicit example in this handoff: a fix that
+looked fully verified locally still carried one wrong assumption, and
+only the real CI run surfaced it — exactly the standard this whole
+session was about applying to the rest of the repo.
 
 ## What was explicitly NOT done this session, and why
 
@@ -119,13 +131,14 @@ what was actually tested.
 
 - `.github/workflows/ci.yml` — `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD`
   added to the `php-quality` job's "Run tests (Pest)" step and the `e2e`
-  job's "Run end-to-end tests" step; `npm install -g npm@12.0.2` added
-  after `actions/setup-node` in both `js-quality` and `e2e`.
+  job's "Run end-to-end tests" step; `npm install -g npm@11.5.0` added
+  after `actions/setup-node` in both `js-quality` and `e2e` (corrected
+  from an initial, real-CI-run-disproven npm@12.0.2 — see above).
 - `package.json` — `vite` ^5.2.0→^6.4.3, `vitest` ^1.6.0→^4.1.11,
   `@vitejs/plugin-vue` ^5.0.0→^5.2.1, `laravel-vite-plugin`
   ^1.0.0→^1.3.0.
-- `package-lock.json` — regenerated under npm 12.0.2; `npm audit`
-  reports 0 vulnerabilities against it.
+- `package-lock.json` — regenerated under Node 20 + npm 11.5.0 (CI's
+  actual toolchain); `npm audit` reports 0 vulnerabilities against it.
 - `README.md` — status banner corrected from `v1.0.0-pending` to the
   real tag state (tagged at Session 25, Sessions 26–28 shipped after).
 - `docs/project-memory/09-decision-log.md` — new Session 29 entry with
@@ -139,12 +152,14 @@ what was actually tested.
   inferred: pulled and read the actual failing steps' output for the
   latest run and for Session 27/28's own runs, for all three failing
   jobs.
-- **npm/osv-scanner side fully verified locally:** local Postgres 16 +
-  Redis actually started in this session's sandboxed environment
-  (Docker's own daemon wasn't available there); `npm ci` (matching what
-  CI runs), `npm run build` (Vite 6, both configs), `npm run lint`
-  (ESLint), and `npm audit` (0 vulnerabilities) all run clean under npm
-  12.0.2 against the regenerated lockfile.
+- **npm/osv-scanner side fully verified locally, including a
+  self-correction:** `npm ci` (matching what CI runs), `npm run build`
+  (Vite 6, both configs), `npm run lint` (ESLint), and `npm audit` (0
+  vulnerabilities) all run clean under Node 20 + npm 11.5.0 against the
+  regenerated lockfile — the exact toolchain CI uses, not the Node 22 +
+  npm 12.0.2 combination this session first verified against and had
+  to correct after the real PR run failed on it (see "Root cause 2"
+  above).
 - **Pest/E2E side: root cause confirmed against real Postgres, fix not
   locally re-run end-to-end.** Reproduced the exact `pgsql_migrate`
   auth failure locally against a real Postgres 16 instance configured

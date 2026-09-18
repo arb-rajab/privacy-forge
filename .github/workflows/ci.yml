@@ -200,9 +200,13 @@ jobs:
         # properties of null (reading 'edgesOut') in #loadPeerSet) when
         # resolving vitest >=4.1's peer graph — reproduced here in complete
         # isolation (a bare `npm install vitest@4.1.11` with no other
-        # dependencies) and confirmed fixed under npm 12.0.2, which is what
-        # package-lock.json was regenerated and verified against.
-        run: npm install -g npm@12.0.2
+        # dependencies), confirmed still present under npm 10.8.2 too, and
+        # confirmed fixed under npm 11.5.0. npm 12.x needs Node >=22 and
+        # fails outright on this job's Node 20 (EBADENGINE) — 11.5.0 is the
+        # highest line that still declares Node 20.17+ support (npm 11's
+        # own package.json engines field), which is what package-lock.json
+        # was regenerated and verified against, on Node 20 specifically.
+        run: npm install -g npm@11.5.0
 
       - name: Cache Composer dependencies
         uses: actions/cache@v4
@@ -267,8 +271,10 @@ jobs:
 
       - name: Upgrade npm
         # See the matching step's comment in the e2e job: Node 20's bundled
-        # npm 10.9.7 can't resolve vitest >=4.1's peer graph.
-        run: npm install -g npm@12.0.2
+        # npm can't resolve vitest >=4.1's peer graph, and npm 12.x needs
+        # Node >=22 (this job stays on Node 20) — 11.5.0 is the fix that
+        # actually runs here.
+        run: npm install -g npm@11.5.0
 
       - name: Install frontend dependencies
         run: npm ci

@@ -1223,12 +1223,27 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   a genuine arborist crash (`TypeError: Cannot read properties of null
   (reading 'edgesOut')` in `#loadPeerSet`) resolving `vitest@4.1.11`'s
   peer graph — reproduced in total isolation (a bare `npm install
-  vitest@4.1.11` with nothing else in the project), confirmed fixed
-  under npm 12.0.2. `ci.yml`'s `js-quality` and `e2e` jobs now pin
-  `npm install -g npm@12.0.2` right after `actions/setup-node`, before
-  `npm ci`, and `package-lock.json` was regenerated and verified
-  (`npm ci`, `npm run lint`, `npm run build`, `npm audit`) under that
-  same npm version so CI reproduces exactly what was tested locally.
+  vitest@4.1.11` with nothing else in the project). First fix attempt
+  pinned npm 12.0.2, verified locally against Node 22 (the sandbox
+  environment's own default) and pushed as a PR specifically to get a
+  real CI run rather than trust that local result blind — **and that
+  real run caught a real mistake**: `ci.yml`'s Node version is 20, and
+  npm 12.x requires Node >=22 (`EBADENGINE`), so the first push's
+  `js-quality` job failed immediately on `npm install -g npm@12.0.2`
+  itself, before ever reaching the vitest peer-graph bug it was meant
+  to fix. Re-tested against Node 20 specifically (this repo's actual CI
+  Node version, available locally at a separate path) and confirmed
+  npm 11.5.0 — the highest 11.x release still declaring Node 20.17+
+  support — both fixes the arborist crash *and* installs cleanly on
+  Node 20. `ci.yml`'s `js-quality` and `e2e` jobs pin `npm install -g
+  npm@11.5.0` right after `actions/setup-node`, before `npm ci`, and
+  `package-lock.json` was regenerated and verified (`npm ci`, `npm run
+  lint`, `npm run build`, `npm audit`) under that exact Node 20 + npm
+  11.5.0 combination, not just spot-checked on a different Node major
+  version. Left in as a concrete example of why "verify via a real
+  run" was worth insisting on for this whole session: a plausible,
+  locally-clean fix still shipped one wrong assumption (which Node
+  version CI actually uses), and only the real Actions run caught it.
 - **Verification standard applied:** local Postgres 16 + Redis were
   actually started in the verification environment (not Docker — no
   daemon available there) to confirm the `DB_MIGRATE_*` diagnosis
