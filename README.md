@@ -1,7 +1,10 @@
 # privacy-forge
 
-> **Status:** v1.0.0-pending. Consent capture, the DSAR lifecycle
-> (intake → identity verification → erasure approval, with a real
+> **Status:** tagged `v1.0.0` (Session 25), with Sessions 26–28 shipped
+> on top of that tag closing remaining debt (R-07 cold-build
+> re-verification, R-01's DB-level grant revocation and its concurrency/
+> credential-scoping gaps). Consent capture, the DSAR lifecycle (intake →
+> identity verification → erasure approval, with a real
 > separation-of-duties denial enforced by ABAC), retention policies,
 > RoPA export, and a tamper-evident, externally-anchored audit log are
 > all implemented, tested, and reachable through real staff/data-subject

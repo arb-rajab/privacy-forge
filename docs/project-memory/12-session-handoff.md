@@ -4,272 +4,279 @@
 - Repository: `privacy-forge` (https://github.com/arb-rajab/privacy-forge)
 - Public or private: public (flagship)
 - Product/domain: Data-privacy / consent & DSAR compliance engine
-- Current version or branch: `main`, tagged `v1.0.0` at Session 25.
+- Current version or branch: `main`, tagged `v1.0.0` at Session 25, with
+  Sessions 26–28 shipped on top of that tag (README's status banner
+  previously still said `v1.0.0-pending`, corrected this session).
 
 ## Session completed
-- Session number and title: **Session 27 — backlog staleness audit
-  (Part A), then close R-01 for real (Part B).**
-- Objective: Part A — verify the v1.0.0 release notes' claim of "six open
-  backlog items (B-01–B-06)" against actual repo state, not the user's
-  recollection, and correct `11-backlog.md`/`13-release-notes.md` if
-  stale. Part B — implement R-01 (audit log DB-level grant revocation)
-  for real: a genuinely non-owning Postgres role for the app's runtime
-  connection, UPDATE/DELETE revoked on `audit_log_entries`, proven with a
-  real test that connects as the app's normal credential and gets
-  rejected by Postgres itself.
-- Status: **Both parts complete.** 191/191 tests pass (185 Feature + 6
-  Unit), Pint/Larastan (level 8)/ESLint clean, OpenAPI validates,
-  end-to-end verified against both `docker-compose.yml` and
-  `docker-compose.prod.yml`'s real running stacks — all re-confirmed this
-  session, not assumed.
+- Session number and title: **Session 29 — CI found genuinely red on
+  `main`; three root causes fixed (two pre-existing, one only
+  surfaced by fixing the first), README status line corrected.**
+- Objective: an external audit checked the GitHub Actions tab directly
+  (not commit messages) and found three jobs failing on every run since
+  Session 27: `php-quality` (Pest), `e2e` (Pest Browser Testing), and
+  `dependency-scan` (osv-scanner). This directly contradicted Session
+  27/28's own commit messages, both claiming "191/191 tests pass."
+  Root-cause each failure separately, fix what's fixable for real (no
+  suppressing/skipping checks), and correct the stale README status
+  line while here.
+- Status: **DONE — confirmed via a real GitHub Actions run, not
+  inference.** Opened as PR #1 specifically to get genuine CI runs
+  rather than trust local testing (itself proven necessary — see "Root
+  cause 2" below for a fix this session got wrong on the first local
+  pass, and only the real CI run caught). After three rounds of
+  fix-and-push, **PR #1's head commit (`68e4fc5`) shows all 9 CI checks
+  green** and `mergeable_state: clean`. This is the first fully green
+  CI run on this repository since at least Session 18 (every run
+  checked back that far had at least one red job).
 
-## Part A: backlog staleness audit
+## Root cause 1: Pest + E2E — a CI-workflow gap dating back to Session 27, not a regression introduced this session
 
-The user's recollection was correct, and the docs were stale. Verified
-directly against commit history and current code, not assumed:
+`tests/Concerns/RefreshesDatabaseAsOwner.php` (added Session 27) runs
+`migrate:fresh --database=pgsql_migrate` at the **start of every single
+Feature/Browser test**, not once up front — `tests/Pest.php` applies it
+suite-wide. `.github/workflows/ci.yml`'s one-time "Run migrations" step
+was correctly given `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD` at
+Session 27, but the "Run tests (Pest)" and "Run end-to-end tests" steps
+— where `composer test`/`composer test:e2e` actually execute, and where
+`migrateFreshUsing()` therefore actually runs, repeatedly — were never
+given those same two variables. `config/database.php`'s `pgsql_migrate`
+connection falls back to an empty-string password when they're absent,
+so Postgres rejects the connection before a single assertion runs.
 
-- **B-04** (`GET /admin/audit-log`) and **B-05** (retention execution
-  history endpoint) were both built and closed at **Session 22**
-  (`c23f665`) — `AuditLogController::index` and
-  `RetentionPolicyController::executions` both exist, are routed, and are
-  covered by Feature tests. Confirmed present in the current codebase.
-- **B-06** (production image) was closed at **Sessions 23–24** — the
-  image built at Session 23 (`5d0ac8e`), the remaining infra-provisioning
-  half explicitly descoped at Session 24. `11-backlog.md`'s own B-06 row
-  already carried a "Fully closed, Session 24" note, but had been left in
-  the "Next up" table instead of moved to "Closed" — likely why it kept
-  getting miscounted as open.
-- **B-01, B-02, B-03** re-confirmed still genuinely open against current
-  code (not assumed from their descriptions): no `export-instance`-style
-  archival command exists; `RetentionPolicyController::store()` still
-  creates a new `active` policy with no uniqueness check against an
-  existing active row for the same `data_category_id`; `.github/
-  workflows/ci.yml` still has no `schedule:` trigger on the `osv-scanner`
-  job.
+**Why "191/191 tests pass" was an honest claim, not a fabricated one:**
+`docker-compose.yml`'s `migrate` service (also added Session 27) loads
+`.env.migrate` — which sets both variables — via `env_file`, and
+Session 27/28's local/Docker verification ran `composer test` through
+that service, where it genuinely does pass. Docker Compose's single
+`migrate` service running both `migrate` and `composer test` under one
+shared `env_file` masked that `ci.yml` sets environment per-*step*, not
+per-*job*: updating the migration step's `env:` block did not also
+update the test step's. Confirmed the identical failure signature on
+both Session 27's own CI run and Session 28's — the gap has reproduced
+on every push since the commit that introduced it.
 
-**Fixed:** `11-backlog.md` — B-04/B-05/B-06 moved to "Closed" with real
-resolution detail and commit references; B-01–B-03 re-confirmed with a
-2026-08-19 note. `13-release-notes.md`'s "Known debt going into v1.0.0"
-section corrected from "B-01–B-06 — six open backlog items" to "B-01–B-03
-— three open backlog items," with an explicit note that the miscount was
-corrected after this audit.
+**Fix:** added `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD` to both
+test-running steps' `env:` blocks, in both the `php-quality` and `e2e`
+jobs.
 
-## Part B: R-01 closed for real
+**Not a recurrence of R-08:** `e2e`'s own top-of-job comment already
+notes this job runs Playwright directly on the GitHub-hosted runner, not
+via `docker/Dockerfile` — confirmed in this session's failing run:
+Chromium downloaded and the job reached real Pest Browser Testing output
+before failing on the same Postgres auth error as `php-quality`, not a
+hang. R-08 (Docker-launched Chromium hanging on this host class) is
+unrelated and unaffected.
 
-**The original premise was half wrong, and testing that directly changed
-the design.** ADR-0003 assumed a table owner can't revoke privileges from
-itself. Tested against a real Postgres 16 instance: an owner *can*
-`REVOKE UPDATE, DELETE ON t FROM owner_role`, and Postgres genuinely
-enforces it — but the same owner role can just as trivially `GRANT` the
-privilege back to itself afterward, since ownership carries the
-unrevocable right to alter a table's ACL. Verified end to end: revoke,
-confirm `UPDATE` fails, `GRANT` it back, confirm the same connection now
-succeeds. Against R-01's actual threat model (the app's own runtime DB
-credential running buggy or attacker-controlled arbitrary SQL), a
-self-revoke is only a soft barrier — the same access that could tamper
-with a row could just as easily re-grant itself first.
+## Root cause 2: osv-scanner — unrelated, and considerably older
 
-**What was built instead:** a second, genuinely non-owning Postgres role,
-`privacy_forge_app`. It does not own any table, is granted full
-SELECT/INSERT/UPDATE/DELETE everywhere it needs it, but only
-SELECT/INSERT on `audit_log_entries`. The schema-owning role
-(`privacy_forge`, unchanged) is now used only for `php artisan migrate
---database=pgsql_migrate`; the running application (`app`/`worker`, both
-compose files) connects as `privacy_forge_app` for everything else.
+Checked runs as far back as Session 18 (2026-08-17): `dependency-scan`
+was already failing there, two sessions before Session 27's R-01 work
+even started. Not a Session 27/28 regression — real, disclosed CVEs in
+frontend dev dependencies accumulating silently because nothing ever
+re-ran the scan outside of `on: push`/`pull_request` and nobody was
+reading CI's result. This is exactly the gap `11-backlog.md`'s B-03
+("no scheduled re-scan trigger") describes; **B-03 remains open, not
+addressed this session** — it would not have prevented this (the scan
+was already wired to run on every push; the miss was human, not
+schedule), but a scheduled re-run would have caught new advisories
+against an unchanged `main` between pushes.
 
-**A real correctness issue surfaced along the way:** Postgres requires
-the `UPDATE` privilege for `SELECT ... FOR UPDATE` *and* `FOR SHARE`,
-even without an actual `UPDATE` — verified directly. `AuditLogger::
-record()` used `->lockForUpdate()` to serialize concurrent hash-chain
-writes, which would have broken under the new role entirely (a role that
-can never legitimately need `UPDATE` would then be unable to insert into
-its own append-only log correctly). Fixed by replacing it with
-`pg_advisory_xact_lock(hashtext(...))`, which needs no table privilege at
-all and provides the same serialization guarantee.
+Original findings: `esbuild` 0.21.5, `vite` 5.4.21 (×3 advisories),
+`vitest` 1.6.1 — all with fixed versions available.
 
-**A test-harness-only deadlock found and fixed:** three existing tests
-(`ResetDemoInstanceCommandTest`, `AuditChainAnchorTest`,
-`ConsentCaptureTest`) either invoke `demo:reset` (whose `TRUNCATE` must
-now run via the owning connection) or simulate direct-DB-access tampering
-via that same owning connection — both now genuinely separate Postgres
-sessions from the test's default connection. Two real, confirmed
-consequences: (1) `RefreshDatabase` holds the whole test in one open
-transaction, so a cross-session `TRUNCATE` deadlocks against it forever —
-reproduced and confirmed via `pg_stat_activity` (one session `idle in
-transaction`, the other blocked on a `relation` lock), not a flaky
-timeout; (2) rows inserted-but-uncommitted on the default connection are
-genuinely invisible to the other session, confirmed directly via
-`tinker` — so a same-test cross-connection write silently matched zero
-rows rather than erroring, which is why the first fix attempt "passed"
-for the wrong reason. Both fixed with an explicit `DB::commit()` before
-crossing connections, each commented with why. Neither is a production
-concern: a scheduled `demo:reset` never runs inside another request's
-open transaction, and a real attacker with direct DB access acts on
-already-committed rows.
+**Fix, not suppression:** upgraded `vite` 5→6.4.3, `vitest` 1→4.1.11,
+`@vitejs/plugin-vue`→5.2.1, `laravel-vite-plugin`→1.3.0 (the last two
+are the minimum versions each package declares vite-6 peer
+compatibility at). 4.1.11, not just 3.2.6, because regenerating the
+lockfile surfaced a further `@vitest/mocker` path-traversal advisory
+disclosed after the original three — fixed rather than reintroduced.
+Also ran `npm audit fix` for two more advisories (`js-yaml`, `qs`) the
+same lockfile regeneration surfaced. `npm audit` and (once pushed) a
+real `osv-scanner` run are both required to consider this genuinely
+closed — see "Validation performed."
 
-**Proof, not just design:** `tests/Feature/AuditLogGrantEnforcementTest.php`
-connects as the real app runtime role (confirmed via `current_user`,
-distinct from the migrate role) and issues raw SQL UPDATE/DELETE against
-`audit_log_entries` directly — not through `AuditLogEntry::save()`/
-`delete()`, which already throw at the application layer and would prove
-nothing about the database itself. Both rejected with Postgres error
-`42501` (`insufficient_privilege`); SELECT/INSERT still work (positive
-control). Independently reproduced via a raw `psql` session against both
-compose files' Postgres, and end to end against the running
-`docker-compose.prod.yml` stack: the role-creation migration run against
-its *existing* data volume (not just a fresh one — idempotent, checked
-via `pg_roles`), a real `privacy-forge:create-owner`, a real `POST
-/login` over HTTPS, and a real authenticated `GET
-/api/v1/admin/audit-log` returning that login's own audit entries.
+**One more real bug found while verifying this, unrelated to the CVEs
+themselves:** Node 20's bundled npm has a genuine arborist crash
+(`TypeError: Cannot read properties of null (reading 'edgesOut')` in
+`#loadPeerSet`) resolving `vitest@4.1.11`'s peer graph — reproduced in
+complete isolation (a bare `npm install vitest@4.1.11`, nothing else in
+the project). **This session's own first attempt at fixing it was
+wrong, and the real PR CI run — not local testing — is what caught
+it:** pinned npm 12.0.2, verified locally (but against Node 22, this
+sandbox's own default, not CI's actual Node 20), pushed as PR #1
+specifically to get a real run instead of trusting that. The first
+`js-quality` run failed immediately: npm 12.x requires Node >=22
+(`EBADENGINE`) and CI stays on Node 20, so the fix never even reached
+the bug it was meant to fix. Re-tested against Node 20 itself (present
+locally at a separate path) and confirmed npm 11.5.0 — the highest
+11.x release still declaring Node 20.17+ support — fixes the arborist
+crash and installs cleanly there. `ci.yml`'s `js-quality` and `e2e`
+jobs now pin `npm install -g npm@11.5.0`; `package-lock.json` was
+regenerated and verified under that exact Node 20 + npm 11.5.0
+combination. Kept as an explicit example in this handoff: a fix that
+looked fully verified locally still carried one wrong assumption, and
+only the real CI run surfaced it — exactly the standard this whole
+session was about applying to the rest of the repo.
 
-**Decision recorded, not silently redesigned:** the full reasoning above
-— including the empirical test of the rejected self-revoke alternative —
-is in `09-decision-log.md`'s Session 27 entry. ADR-0003 itself was not
-reopened (per this session's ground rules); the entry explicitly notes
-it's a correction to the ADR's stated premise, not its Decision.
+## Root cause 3: a third bug, invisible until the first fix let tests actually run
+
+With `DB_MIGRATE_*` fixed, `php-quality`'s real CI run went from 6
+passed/186 failed to **190 passed/2 failed** — both failures in
+`Tests\Feature\DemoModeSharedPropTest`, "Not a valid Inertia response."
+It's the only Feature test that does a real `$this->get()` on a page
+route (every other Feature test hits `routes/api.php`'s JSON endpoints,
+never touching the Blade root view). `php-quality` has never run `npm
+run build` — only `e2e` does, since Browser tests need real built
+assets in an actual browser — so `app.blade.php`'s `@vite()` throws on
+a missing `public/build/manifest.json`. Present since the test was
+added at Session 22; never visible before because every test was
+already failing on the `DB_MIGRATE_*` issue. Fixed with Laravel's
+`withoutVite()` test helper, scoped to just that file via a Pest
+`beforeEach` (not `TestCase`-wide — Browser tests share the same
+`TestCase` and genuinely need real Vite output).
 
 ## What was explicitly NOT done this session, and why
 
-1. **No ADR opened, reopened, or modified.** ADR-0001–0008 untouched.
-   ADR-0003's premise was found to be partly wrong, but the fix is
-   recorded in the decision log, not as an ADR edit, per this session's
-   explicit ground rules.
-2. **R-08 not touched** — accepted, not revisited.
-3. **B-01, B-02, B-03** — re-confirmed still open, not picked up this
-   session (out of Part B's scope).
-4. **The OpenAPI contract was not touched** — confirmed via `git status`
-   before starting, and the validator still passes against the unchanged
-   spec.
-5. **No demo-hosting or infrastructure decision reopened.**
+1. **No check skipped, disabled, or weakened to force green.** Both
+   fixes are real: a missing CI env var, and genuine dependency upgrades.
+2. **B-03 (scheduled osv-scanner re-run) not implemented** — real,
+   recommended, out of this session's stated scope (fix the current red
+   state; B-03 is preventing a *future* recurrence of a different kind).
+3. **No ADR opened, reopened, or modified.**
+4. **`composer.lock`/PHP dependencies untouched** — osv-scanner's
+   original findings were 100% npm-ecosystem; PHP had zero flagged
+   vulnerabilities both before and after this session's changes.
+5. **R-07, R-08, B-01, B-02** — untouched, unaffected.
 
 ## Files created or changed
 
-**Created:**
-- `database/migrations/2026_08_19_000001_add_restricted_runtime_role_for_audit_log.php`
-- `tests/Feature/AuditLogGrantEnforcementTest.php`
-- `tests/Concerns/RefreshesDatabaseAsOwner.php`
-
-**Changed:**
-- `docs/project-memory/11-backlog.md` — B-04/B-05/B-06 moved to Closed
-  with real detail; B-01–B-03 re-confirmed.
-- `docs/project-memory/13-release-notes.md` — open-debt count corrected
-  from six to three.
-- `docs/project-memory/10-risk-register.md` — R-01 closed with full
-  detail.
-- `docs/project-memory/09-decision-log.md` — new Session 27 entry (R-01
-  closure reasoning, the rejected self-revoke alternative, the advisory-
-  lock fix, the test-harness deadlock).
-- `config/database.php` — new `pgsql_migrate` connection.
-- `.env.example`, `.env` — `DB_USERNAME`/`DB_PASSWORD` now the restricted
-  runtime role; new `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD`.
-- `app/Services/AuditLogger.php` — `lockForUpdate()` replaced with
-  `pg_advisory_xact_lock`.
-- `app/Console/Commands/ResetDemoInstanceCommand.php` — its `TRUNCATE`
-  now runs via the `pgsql_migrate` connection.
-- `tests/Feature/ResetDemoInstanceCommandTest.php`,
-  `tests/Feature/AuditChainAnchorTest.php`,
-  `tests/Feature/ConsentCaptureTest.php` — `DB::commit()` before
-  cross-connection operations; the latter two's simulated tampering now
-  goes through `pgsql_migrate` (realistic: that's the elevated-access
-  threat they model).
-- `tests/Pest.php`, `tests/TestCase.php` — `RefreshDatabase` swapped for
-  the new `RefreshesDatabaseAsOwner` trait (routes `migrate:fresh` through
-  the owning connection; a plain method override on `TestCase` doesn't
-  work here, see the trait's own comment for why).
-- `docker-compose.yml`, `docker-compose.prod.yml` — explanatory comments
-  on the two-role split (no functional change needed beyond `.env`).
-- `.github/workflows/ci.yml` — both jobs' migrate steps now use
-  `--database=pgsql_migrate` with the owner's real credentials.
-- `README.md`, `CONTRIBUTING.md`,
-  `docs/project-memory/08-deployment-and-operations.md` — migrate command
-  updated to `--database=pgsql_migrate`.
-
-**Not changed:** any ADR, the OpenAPI spec, R-08, B-01/B-02/B-03's
-substance (only their audit-confirmed status), any frontend code.
+- `.github/workflows/ci.yml` — `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD`
+  added to the `php-quality` job's "Run tests (Pest)" step and the `e2e`
+  job's "Run end-to-end tests" step; `npm install -g npm@11.5.0` added
+  after `actions/setup-node` in both `js-quality` and `e2e` (corrected
+  from an initial, real-CI-run-disproven npm@12.0.2 — see above).
+- `package.json` — `vite` ^5.2.0→^6.4.3, `vitest` ^1.6.0→^4.1.11,
+  `@vitejs/plugin-vue` ^5.0.0→^5.2.1, `laravel-vite-plugin`
+  ^1.0.0→^1.3.0.
+- `package-lock.json` — regenerated under Node 20 + npm 11.5.0 (CI's
+  actual toolchain); `npm audit` reports 0 vulnerabilities against it.
+- `README.md` — status banner corrected from `v1.0.0-pending` to the
+  real tag state (tagged at Session 25, Sessions 26–28 shipped after).
+- `docs/project-memory/09-decision-log.md` — new Session 29 entry with
+  the full diagnosis above, including exact error signatures and how
+  each was confirmed.
+- `docs/project-memory/12-session-handoff.md` — this file.
+- `tests/Feature/DemoModeSharedPropTest.php` — `withoutVite()` added
+  (Root cause 3, above).
 
 ## Validation performed
 
-- **Full test suite → 191/191 passed** (185 Feature + 6 Unit), run
-  against the real dev docker-compose stack. (The Browser suite, R-08's
-  accepted residual risk, was not run — it's outside `phpunit.xml.dist`'s
-  declared testsuites and known to hang on this host class regardless.)
-- **`composer lint` (Pint) → clean, 164 files.**
-- **`composer analyse` (Larastan, level 8) → 0 errors, 68 files.**
-- **`npm run lint` (ESLint) → clean.**
-- **`docs/architecture/openapi.yaml` → valid**, same throwaway
-  `python:3.12-slim`-container method prior sessions used; confirmed
-  untouched by this session's changes via `git status` first.
-- **R-01 proven twice, independently:** the Pest test suite, and a raw
-  `psql` session as `privacy_forge_app` against both compose files'
-  Postgres.
-- **End-to-end against the real running `docker-compose.prod.yml`
-  stack:** rebuilt and recreated to pick up the new `.env`; the migration
-  run against its pre-existing data volume; grants confirmed via `\dp`;
-  a real `privacy-forge:create-owner`, `POST /login` over HTTPS, and
-  `GET /api/v1/admin/audit-log` all succeeded, returning that login's own
-  audit entries.
+- **Root cause confirmed against real GitHub Actions job logs**, not
+  inferred: pulled and read the actual failing steps' output for the
+  latest run and for Session 27/28's own runs, for all three originally
+  failing jobs, and for each subsequent PR #1 run after every push.
+- **npm/osv-scanner side fully verified locally, including a
+  self-correction:** `npm ci` (matching what CI runs), `npm run build`
+  (Vite 6, both configs), `npm run lint` (ESLint), and `npm audit` (0
+  vulnerabilities) all run clean under Node 20 + npm 11.5.0 against the
+  regenerated lockfile — the exact toolchain CI uses, not the Node 22 +
+  npm 12.0.2 combination this session first verified against and had
+  to correct after the real PR run failed on it (see "Root cause 2"
+  above).
+- **Pest/E2E/withoutVite fixes: not locally re-run end-to-end, but
+  confirmed by the real PR CI run.** `composer install` itself could
+  not complete in this session's sandboxed environment — GitHub API
+  rate-limiting and intermittent proxy resets on `api.github.com`
+  unrelated to this repository, confirmed via the proxy's own status
+  endpoint. Root cause was reproduced locally against a real Postgres
+  16 instance before writing the fix, but the fix itself was verified
+  by pushing to PR #1 and reading the real Actions run — three rounds
+  total (DB_MIGRATE_* fix → npm version correction → withoutVite fix),
+  each one driven by what the previous real run actually showed, not
+  by assuming the previous fix worked.
+- **Final state, confirmed on PR #1's head commit `68e4fc5`: all 9 CI
+  checks green** (PHP lint/Larastan/Pest, E2E/Pest Browser Testing,
+  osv-scanner, CodeQL, gitleaks, OpenAPI validation, JS lint/build,
+  framework-version governance), `mergeable_state: clean`. Not
+  inferred — read directly from the PR's check-run API after each push.
 
 ## Open questions and risks
 
-- **R-01** — closed. See `10-risk-register.md`.
-- **B-01, B-02, B-03** — confirmed still open this session, unchanged.
-- **R-07** — closed at Session 26, unaffected by this session.
-- **R-08** — unchanged, accepted residual.
+- **Pest/E2E/osv-scanner/withoutVite fixes** — all four confirmed via a
+  real, fully green GitHub Actions run on PR #1 (`68e4fc5`), not
+  inference. Nothing left open on the CI-red investigation itself.
+- **Whether/how to land PR #1** — this repo's established convention
+  (41 prior commits) is direct-to-main, no PRs; PR #1 was opened this
+  session specifically to get real CI runs rather than push blind to
+  `main`. Merging it, or replicating its commits directly to `main` and
+  closing it unmerged, is a decision for whoever owns this repo — not
+  made unilaterally this session.
+- **B-01, B-02, B-03** — unchanged, still open.
+- **R-07, R-08** — unchanged.
+- **New standing risk worth naming:** nothing in this project's process
+  re-checks a pushed commit's own CI result. That's how three jobs went
+  red for a month unnoticed. Not filed as a new risk-register ID this
+  session (out of stated scope), but flagged here for whoever picks up
+  B-03 next — the same session should probably also add a habit (or
+  automation) of checking the Actions tab after pushing, not just
+  running tests locally before pushing.
 
 ## Next recommended session
 
-Genuinely post-v1 work remains: B-01 (archival export), B-02 (retention
-policy uniqueness race), B-03 (weekly `osv-scanner` re-run trigger) — none
-block anything closed so far.
+Pick up `B-01`, `B-02`, or `B-03` from `11-backlog.md` — B-03
+specifically would help prevent a *future* version of this session's
+finding (though not this exact one, since the scan already ran on every
+push). Before starting any of them: **check the Actions tab on the
+commit this session pushes**, to confirm the CI fix actually took —
+don't assume from this handoff alone.
 
 - Inputs required: `docs/project-memory/11-backlog.md` for the exact
-  current state of B-01–B-03.
+  current state of B-01–B-03; this file's "Root cause" sections above
+  if anything CI- or dependency-related is touched again.
 
 ## Paste-into-new-session context
 
 **Project:** privacy-forge — self-hostable, single-organisation consent,
 DSAR, and data-retention engine for small SaaS teams, GDPR/UK-GDPR only
 **Track:** public flagship
-**Repository state:** branch `main`, tagged `v1.0.0` (Session 25) — this
-session's changes not yet pushed as of this handoff being written.
+**Repository state:** branch `main`, tagged `v1.0.0` (Session 25),
+Sessions 26–28 shipped on top of it. This session's CI/README fix is
+pushed as of this handoff being written — **verify its Actions run is
+green before trusting "CI passes" again.**
 
-**Current stack:** unchanged — no dependency versions touched this
-session. Two Postgres roles now exist per instance (`privacy_forge`,
-schema owner; `privacy_forge_app`, restricted runtime role) — see
+**Current stack:** `vite` 6.4.3, `vitest` 4.1.11 (both bumped this
+session for real CVEs, not stylistic). PHP/composer side unchanged. Two
+Postgres roles per instance unchanged (`privacy_forge` schema owner,
+`privacy_forge_app` restricted runtime role) — see
 `config/database.php`.
 
 **Architecture decisions that must not be reversed:** all ADRs
-(0001–0008, none reopened — ADR-0003's stated premise was corrected in
-the decision log, not the ADR itself), GDPR-only, single-tenant, the
-Session 24 demo-hosting revision (no real public infrastructure), R-01's
-two-role design (a self-revoking single role was tested and rejected —
-don't re-propose it without re-reading the Session 27 decision-log
-entry).
+(0001–0008, none touched this session), GDPR-only, single-tenant, the
+Session 24 demo-hosting revision, R-01's two-role design.
 
 **Implementation state:**
-- Done: everything through Session 26, plus this session's backlog audit
-  and R-01's real DB-level grant revocation.
+- Done: everything through Session 28, plus this session's CI-red
+  diagnosis/fix and README correction.
 - In progress: nothing mid-flight.
 - **Known gaps, unchanged and honestly still open:** `B-01`, `B-02`,
   `B-03`; `R-08` (browser E2E, accepted residual).
-- Not started: `B-01`–`B-03`.
+- **Newly flagged, not filed as a formal risk:** no process step checks
+  a pushed commit's own CI result — root cause of this whole session.
 
-**Constraints and non-goals:** unchanged since Session 1. Still at the
-2-new-technology cap (ABAC, ASVS L2).
+**Constraints and non-goals:** unchanged since Session 1.
 
-**Task for next session (single objective):** pick up `B-01`, `B-02`, or
-`B-03` from `11-backlog.md` — none block or reopen anything this session
-closed.
+**Task for next session (single objective):** confirm this session's CI
+fix actually went green on the real Actions run, then pick up `B-01`,
+`B-02`, or `B-03` from `11-backlog.md`.
 
 **Files to attach or paste:**
 - `docs/project-memory/12-session-handoff.md` (this file)
 - `docs/project-memory/11-backlog.md`
-- `docs/project-memory/09-decision-log.md` (Session 27 entry, for R-01's
-  reasoning if anything nearby is ever touched again)
+- `docs/project-memory/09-decision-log.md` (Session 29 entry, for the
+  full CI diagnosis if anything nearby is touched again)
 
-**Ground rules:** Do not reopen ADR-0001–0008. Do not re-propose a
-self-revoking single role for the audit log — tested and rejected this
-session, see the decision log. `R-08` is accepted residual — don't
-reopen it. `B-01`–`B-03` are real and open — don't assume they're closed
-without checking current code, the same standard this session held the
-backlog docs to.
+**Ground rules:** Do not reopen ADR-0001–0008. `R-08` is accepted
+residual — don't reopen it. Do not assume this session's CI fix worked
+without checking the Actions tab — this whole session exists because a
+prior one made that exact assumption.
