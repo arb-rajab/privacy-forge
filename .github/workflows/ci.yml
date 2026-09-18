@@ -130,11 +130,21 @@ jobs:
           REDIS_HOST: 127.0.0.1
 
       - name: Run tests (Pest)
+        # DB_MIGRATE_USERNAME/PASSWORD must be set here too, not just on the
+        # "Run migrations" step above: tests/Concerns/RefreshesDatabaseAsOwner
+        # (tests/Pest.php) runs migrateFreshUsing() against pgsql_migrate at
+        # the start of every Feature/Browser test, not only once up front.
+        # Omitting them here was a real CI regression (missed when that
+        # trait was added) — pgsql_migrate then falls back to config/
+        # database.php's empty-string default password and every test
+        # fails with a Postgres auth error before assertions even run.
         run: composer test
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: privacy_forge_test
           DB_PASSWORD: privacy_forge_ci
+          DB_MIGRATE_USERNAME: privacy_forge
+          DB_MIGRATE_PASSWORD: privacy_forge_ci
           REDIS_HOST: 127.0.0.1
 
   e2e:
@@ -184,6 +194,16 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Upgrade npm
+        # actions/setup-node's Node 20 bundles npm 10.9.7, whose arborist
+        # dependency resolver has a real bug (TypeError: Cannot read
+        # properties of null (reading 'edgesOut') in #loadPeerSet) when
+        # resolving vitest >=4.1's peer graph — reproduced here in complete
+        # isolation (a bare `npm install vitest@4.1.11` with no other
+        # dependencies) and confirmed fixed under npm 12.0.2, which is what
+        # package-lock.json was regenerated and verified against.
+        run: npm install -g npm@12.0.2
+
       - name: Cache Composer dependencies
         uses: actions/cache@v4
         with:
@@ -221,11 +241,16 @@ jobs:
           DB_MIGRATE_PASSWORD: privacy_forge_ci
 
       - name: Run end-to-end tests (Pest Browser Testing)
+        # See the matching step's comment in the php-quality job above:
+        # RefreshesDatabaseAsOwner needs DB_MIGRATE_USERNAME/PASSWORD on
+        # this step itself, not only on "Run migrations" earlier in this job.
         run: composer test:e2e
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: privacy_forge_test
           DB_PASSWORD: privacy_forge_ci
+          DB_MIGRATE_USERNAME: privacy_forge
+          DB_MIGRATE_PASSWORD: privacy_forge_ci
           REDIS_HOST: 127.0.0.1
 
   js-quality:
@@ -239,6 +264,11 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+
+      - name: Upgrade npm
+        # See the matching step's comment in the e2e job: Node 20's bundled
+        # npm 10.9.7 can't resolve vitest >=4.1's peer graph.
+        run: npm install -g npm@12.0.2
 
       - name: Install frontend dependencies
         run: npm ci

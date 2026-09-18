@@ -1159,3 +1159,87 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   place with both findings and the fix rather than reopened as a new
   risk ID — the underlying risk and its owning decision are unchanged;
   what changed is how completely "Closed" had actually been verified.
+
+## CI found genuinely red on `main` — two unrelated root causes, one dating back to Session 27 undetected (Session 29, 2026-09-17)
+
+- **Prompted by an external audit that checked the Actions tab directly**
+  rather than trusting commit-message claims. Finding: every CI run since
+  Session 27 (`d055051`) — including Session 27's and Session 28's own
+  runs, both claiming "191/191 tests pass" — has three failing jobs:
+  `php-quality` (Pest), `e2e` (Pest Browser Testing), and
+  `dependency-scan` (osv-scanner). `main` has been red for roughly a
+  month with nobody noticing, because nothing in this project's process
+  ever re-checked a pushed commit's own Actions run after pushing it.
+- **Root cause 1 (Pest + E2E, both jobs, identical cause): a CI-workflow
+  gap, not a code or test bug.** Session 27 introduced
+  `tests/Concerns/RefreshesDatabaseAsOwner.php`, which runs
+  `migrate:fresh --database=pgsql_migrate` at the *start of every single
+  Feature/Browser test* (`tests/Pest.php` applies it suite-wide), not
+  once up front. `.github/workflows/ci.yml`'s "Run migrations" step
+  (the one-time initial migration) was correctly given
+  `DB_MIGRATE_USERNAME`/`DB_MIGRATE_PASSWORD`, but the "Run tests
+  (Pest)" and "Run end-to-end tests" steps — where `composer test`/
+  `composer test:e2e` actually execute, and where `migrateFreshUsing()`
+  therefore actually runs — were never given those same two variables.
+  `config/database.php`'s `pgsql_migrate` connection falls back to an
+  empty-string password when they're absent, and Postgres then rejects
+  every connection (`SQLSTATE[08006] ... no password supplied`, or
+  `password authentication failed for user "privacy_forge"` depending
+  on exactly how libpq handles the empty string) before a single
+  assertion runs. **Why "191/191 tests pass" was an honest claim
+  anyway:** `docker-compose.yml`'s `migrate` service (also added
+  Session 27) loads `.env.migrate` — which sets both variables — via
+  `env_file`, and Session 27/28's own local/Docker verification ran
+  `composer test` through that service, where it genuinely does pass.
+  Docker Compose's single `migrate` service running both `migrate` and
+  `composer test` under one shared `env_file` masked that CI's
+  `ci.yml` sets environment per-step, not per-job — updating the
+  migration step's `env:` block did not also update the test step's.
+  Confirmed identical failure signature on both Session 27's own run
+  and Session 28's, i.e. the gap has been present, and reproduced by
+  every push, since the commit that introduced it — not something that
+  crept in gradually. **Fix:** added the same two variables to both
+  test-running steps' `env:` blocks in both jobs.
+- **Root cause 2 (osv-scanner): unrelated, pre-existing, and much
+  older.** Confirmed by checking runs as far back as Session 18
+  (2026-08-17) — `dependency-scan` was already failing there, two
+  sessions before R-01's work even started. Not a Session 27/28
+  regression at all: real, newly-disclosed CVEs in frontend dev
+  dependencies (`esbuild` 0.21.5, `vite` 5.4.21 ×3 advisories, `vitest`
+  1.6.1), accumulating silently because nothing re-ran the scan outside
+  of CI and nobody was reading CI's result. (`11-backlog.md`'s B-03 —
+  "no scheduled re-scan trigger" — is exactly the gap that let this go
+  unnoticed for a month; still open, not addressed this session.)
+  **Fix, not suppression:** upgraded `vite` 5→6.4.3, `vitest` 1→4.1.11
+  (the minimum patch clearing a further `@vitest/mocker` path-traversal
+  advisory disclosed *after* the original three, found only because
+  regenerating the lockfile pulled in current transitive versions —
+  fixed rather than reintroduced), `@vitejs/plugin-vue` and
+  `laravel-vite-plugin` bumped to the minimum versions each declares
+  vite-6 peer compatibility. Also ran `npm audit fix` for two more
+  advisories (`js-yaml`, `qs`) that the same lockfile regeneration
+  surfaced. **One more real bug found while verifying this, unrelated
+  to the vulnerabilities themselves:** Node 20's bundled npm 10.9.7 has
+  a genuine arborist crash (`TypeError: Cannot read properties of null
+  (reading 'edgesOut')` in `#loadPeerSet`) resolving `vitest@4.1.11`'s
+  peer graph — reproduced in total isolation (a bare `npm install
+  vitest@4.1.11` with nothing else in the project), confirmed fixed
+  under npm 12.0.2. `ci.yml`'s `js-quality` and `e2e` jobs now pin
+  `npm install -g npm@12.0.2` right after `actions/setup-node`, before
+  `npm ci`, and `package-lock.json` was regenerated and verified
+  (`npm ci`, `npm run lint`, `npm run build`, `npm audit`) under that
+  same npm version so CI reproduces exactly what was tested locally.
+- **Verification standard applied:** local Postgres 16 + Redis were
+  actually started in the verification environment (not Docker — no
+  daemon available there) to confirm the `DB_MIGRATE_*` diagnosis
+  against a real Postgres auth rejection matching CI's exact error
+  before writing the fix; `composer install` could not complete in that
+  same sandboxed environment (GitHub API rate-limiting/proxy resets
+  unrelated to this repository), so the Pest/E2E fix's final
+  verification is the real GitHub Actions run after pushing, not a
+  local Pest run — recorded here rather than glossed over as "tested."
+  The npm/osv-scanner side was fully verified locally end-to-end.
+- **README's status banner corrected in the same session:** it read
+  `v1.0.0-pending` despite `v1.0.0` having been a real tag since Session
+  25, with Sessions 26–28 already shipped on top of it — fixed to state
+  the tag and that later sessions closed further debt on top of it.
