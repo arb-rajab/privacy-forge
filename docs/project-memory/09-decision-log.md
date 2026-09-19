@@ -1287,3 +1287,84 @@ rediscover the way Session 11 had to check Session 8's TTL-testing claim.
   genuinely green CI run on this repository since Session 26 at the
   latest (every run checked back to Session 18 had at least one red
   job) — see PR #1 for the live check-run links.
+
+## R-09 closed for real: column-scoped Postgres grant, not R-01's blanket revoke copied verbatim (Session 30, 2026-09-19)
+
+Session 29 found `06-security-threat-model.md`'s T-16 row fabricated — it
+claimed a DB-level `UPDATE`/`DELETE` grant restriction on
+`policy_definitions` mirroring R-01's real one for `audit_log_entries`,
+citing a `tests/Feature/PolicyDefinitionGrantTest.php` that never
+existed. The doc was corrected to stop claiming it and R-09 was opened;
+this session builds the real control.
+
+**Why R-01's fix can't be copied verbatim.** `audit_log_entries` is
+append-only by construction — the application never issues `UPDATE`/
+`DELETE` against it, so revoking both from the runtime role costs
+nothing. `policy_definitions` is not: `PolicyController::update()`
+implements versioning (`04-data-model.md`) by superseding the current
+row — `$policy->forceFill(['status' => 'superseded'])->save()` — a real
+`UPDATE` against that row's `status` column, using the exact same
+runtime credential R-01 already scoped down. A blanket revoke would take
+down `policy.update` (ADR-0006's own named sensitive action) outright.
+
+**Decision (full reasoning in `docs/adr/ADR-0009-policy-definitions-column-scoped-grant.md`):**
+revoke `DELETE` entirely (the application never deletes a policy row)
+and narrow `UPDATE` with Postgres's column-level grant grammar
+(`GRANT UPDATE (col, ...) ON table TO role`) to exactly `status` and
+`updated_at` — what the versioning workflow actually writes — leaving
+`SELECT`/`INSERT` at full width. An application-level-only check was
+considered and rejected: T-16's threat is a credential that reaches the
+database *without* going through the controller, so no amount of
+`PolicyController` gating is a response to it by definition — the fix
+has to be enforced by Postgres itself, or it isn't a fix for this threat
+at all.
+
+**Verification, and an honest environment limitation.** This session's
+sandbox could not run `composer install` — not the transient GitHub
+rate-limiting R-07 hit previously, but a different, harder limit: this
+session's GitHub access is scoped to only this one repository, so every
+other Composer dependency's GitHub-hosted source (`api.github.com`
+zipballs and `git clone` fallback alike) returns a 403 from the proxy
+itself. Rather than assume the migration's SQL was correct from reading
+it, the exact grant/revoke statements were run by hand against a real,
+separately-installed local Postgres 16 instance (this environment does
+have Postgres and `psql`, just not a way to fetch every PHP dependency):
+a schema-owning role and `privacy_forge_app` runtime role were created
+matching `config/database.php`'s real setup, R-01's own pre-existing
+blanket grant was applied first (the actual starting state today), and
+then:
+
+1. **Gap reproduced, not assumed:** connected as `privacy_forge_app` and
+   ran a raw `UPDATE policy_definitions SET effect = 'deny' ...` and a
+   raw `DELETE FROM policy_definitions ...` — both **succeeded**, proving
+   T-16/R-09's claimed exposure was real before this session's fix.
+2. **Fix applied and re-verified:** ran this session's migration's exact
+   `REVOKE DELETE`, `REVOKE UPDATE`, `GRANT UPDATE (status, updated_at)`
+   statements, then repeated the identical two commands — both now fail
+   with Postgres `42501` (`permission denied for table
+   policy_definitions`), the same error code and message
+   `AuditLogGrantEnforcementTest.php` (R-01) already asserts on.
+3. **Positive control:** a raw `UPDATE ... SET status = 'superseded'`
+   (what `PolicyController::update()` actually does), a fresh `INSERT`
+   (a new version row), and a plain `SELECT` were all re-run afterward
+   and all still succeeded — the narrowing doesn't break the feature it
+   protects.
+
+`tests/Feature/PolicyDefinitionGrantEnforcementTest.php` encodes these
+same four cases as a permanent Pest regression test, in the same shape
+as `AuditLogGrantEnforcementTest.php`. It could not be executed in this
+sandbox for the reason above; its first real run is this session's PR
+CI, which does have full dependency access, not a local Pest run —
+recorded here plainly rather than glossed over as "tested locally," the
+same standard Session 29's own decision-log entry held itself to for a
+different sandbox limitation.
+
+**Scope, stated honestly, not overclaimed a second time.** This closes
+R-09 as "the real, verified control this row should have described,"
+not as "T-16 fully eliminated." A compromised runtime credential can
+still flip `status` directly (a column the runtime role must keep being
+able to write) or insert a new "version" row that never went through
+`policy.update`'s ABAC gate or audit log — ADR-0009's own "Trade-offs
+accepted" section and the updated T-16 row both say this plainly. Full
+closure would mean redesigning policy versioning to be as genuinely
+append-only as `audit_log_entries` is, which is out of scope here.
