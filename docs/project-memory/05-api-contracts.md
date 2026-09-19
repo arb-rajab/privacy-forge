@@ -115,8 +115,15 @@ tooling and because it gives ABAC denials a natural home for the
 - **Rate limits:** DSAR submission is rate-limited per subject identifier
   (NFR-006, ≤3/24h) via Redis, returning `429` with a `ProblemDetail` body.
   Consent capture is not rate-limited per-subject (a subject may legitimately
-  interact with many purposes), but is rate-limited at the IP level as a
-  general abuse control (finalised in Session 4's threat model).
+  interact with many purposes) but is rate-limited at the IP level on both
+  `POST /consent` and `POST /consent/{consentId}/withdraw` (T-03,
+  `06-security-threat-model.md`) — default 30 requests/minute per endpoint
+  per IP, configurable via `CONSENT_CAPTURE_RATE_LIMIT_PER_MINUTE`/
+  `CONSENT_WITHDRAW_RATE_LIMIT_PER_MINUTE` (`config/consent.php`), also
+  returning `429` with a `ProblemDetail` body. Implemented for real this
+  session (`tests/Feature/ConsentRateLimitTest.php`) — a prior version of
+  this doc described this control as already finalised in Session 4 when no
+  rate-limiting code for these endpoints actually existed.
 
 ## Events published/consumed
 
