@@ -10,6 +10,8 @@ use App\Models\ConsentPurpose;
 use App\Models\ConsentRecord;
 use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
 // Public endpoints (FR-001..004, US-003, US-004) — no staff auth, matching
@@ -30,8 +32,31 @@ class ConsentController extends Controller
         return new ConsentNoticeResource($purpose->currentNotice);
     }
 
+    private function rateLimitResponse(): JsonResponse
+    {
+        return response()->json([
+            'type' => 'about:blank',
+            'title' => 'Too Many Requests',
+            'status' => 429,
+            'detail' => 'Too many requests from this address. Try again shortly.',
+        ], 429);
+    }
+
     public function capture(CaptureConsentRequest $request): JsonResponse
     {
+        // T-03 (06-security-threat-model.md): IP-level rate limit — a
+        // volumetric-abuse control, distinct from the per-subject DSAR
+        // limit in NFR-006 (a subject may legitimately consent to many
+        // purposes; an IP flooding this endpoint is the actual threat).
+        $rateLimitKey = 'consent-capture:'.$request->ip();
+        $maxPerMinute = (int) config('consent.capture_rate_limit_per_minute');
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, $maxPerMinute)) {
+            return $this->rateLimitResponse();
+        }
+
+        RateLimiter::hit($rateLimitKey, 60);
+
         $data = $request->validated();
 
         // The widget must send the notice version it actually displayed
@@ -72,8 +97,17 @@ class ConsentController extends Controller
             ->setStatusCode(201);
     }
 
-    public function withdraw(string $consentId): ConsentRecordResource
+    public function withdraw(Request $request, string $consentId): ConsentRecordResource|JsonResponse
     {
+        $rateLimitKey = 'consent-withdraw:'.$request->ip();
+        $maxPerMinute = (int) config('consent.withdraw_rate_limit_per_minute');
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, $maxPerMinute)) {
+            return $this->rateLimitResponse();
+        }
+
+        RateLimiter::hit($rateLimitKey, 60);
+
         $record = ConsentRecord::query()->findOrFail($consentId);
 
         if ($record->status === 'active') {
