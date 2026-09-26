@@ -63,6 +63,15 @@ services:
       # endpoint must be reached through the web tier instead, unlike
       # docker-compose.yml's dev default (http://app:8000).
       - REFERENCE_CONNECTOR_BASE_URL=http://web
+      # T-03 follow-up: `app` has no host port mapping in this file (only
+      # `web` does, below) — nothing outside this Compose network can
+      # address `app:9000` directly, only the `web` (Caddy) container's
+      # php_fastcgi proxy. Trusting Docker's private address ranges here
+      # (never '*') is therefore trusting exactly "whatever is inside this
+      # private network", which in this topology means Caddy alone, while
+      # still refusing to trust X-Forwarded-For from a real public IP if
+      # `app` were ever additionally exposed by mistake.
+      - TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
     depends_on:
       postgres:
         condition: service_healthy

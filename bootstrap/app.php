@@ -29,6 +29,42 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             HandleInertiaRequests::class,
         ]);
+
+        // T-03 follow-up (06-security-threat-model.md): every real
+        // deployment of this app runs behind a reverse proxy (Caddy —
+        // docker/Caddyfile, docker-compose.prod.yml's `web` service talks
+        // FastCGI to `app`; `app` itself has no host port mapping there,
+        // so nothing outside the Compose network can address it
+        // directly). Without this, $request->ip() — and therefore every
+        // IP-keyed control that reads it (T-03's consent capture/withdraw
+        // limiter, T-13's login lockout) — resolves to the proxy's own
+        // container address for every request, not the real client: one
+        // shared bucket for all real users, exhaustible by a single bad
+        // actor.
+        //
+        // TRUSTED_PROXIES lists only the proxy address(es)/CIDR(s) this
+        // deployment actually sits behind — docker-compose.prod.yml sets
+        // it to the Docker-internal private ranges the `web` container
+        // lives in — never '*', which would let anyone able to reach
+        // `app` directly spoof X-Forwarded-For. Left empty by default
+        // (.env.example, local `php artisan serve`, and the test
+        // environment), so nothing is registered as a trusted proxy and
+        // $request->ip() keeps resolving to the real, directly connecting
+        // peer.
+        $trustedProxies = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TRUSTED_PROXIES', ''))
+        )));
+
+        if ($trustedProxies !== []) {
+            $middleware->trustProxies(
+                at: $trustedProxies,
+                headers: Request::HEADER_X_FORWARDED_FOR
+                    | Request::HEADER_X_FORWARDED_HOST
+                    | Request::HEADER_X_FORWARDED_PORT
+                    | Request::HEADER_X_FORWARDED_PROTO,
+            );
+        }
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // RFC 9457 Problem Details for every API error response, matching
