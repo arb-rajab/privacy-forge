@@ -46,7 +46,7 @@
 # trade. Confirmed by actually running `composer test` against the split
 # image (165/165 passing), not assumed.
 
-FROM php:8.3-cli AS deps
+FROM php:8.5-cli AS deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
