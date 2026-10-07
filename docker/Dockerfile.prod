@@ -26,7 +26,7 @@
 # `npm ci` against an Alpine/musl base hits npm's own optional-deps bug
 # (https://github.com/npm/cli/issues/4828), confirmed by actually hitting
 # it against node:20-alpine before switching this.
-FROM node:20-slim AS frontend-assets
+FROM node:26-slim AS frontend-assets
 
 WORKDIR /app
 
@@ -37,7 +37,7 @@ COPY . .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-FROM php:8.3-fpm AS php-deps
+FROM php:8.5-fpm AS php-deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
