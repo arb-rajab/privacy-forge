@@ -29,6 +29,11 @@ updates:
       # `npm ci` (ERESOLVE). Move eslint and eslint-plugin-vue together.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # eslint-plugin-vue 10 drops the legacy eslintrc presets
+      # (plugin:vue/vue3-recommended), so `npm run lint` fails with the current
+      # .eslintrc.cjs. Move to flat config together with eslint 9/10.
+      - dependency-name: "eslint-plugin-vue"
+        update-types: ["version-update:semver-major"]
       # Tailwind 4 moves the PostCSS plugin to @tailwindcss/postcss and replaces
       # tailwind.config.js; the Vite build fails until that migration is done.
       - dependency-name: "tailwindcss"
