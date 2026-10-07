@@ -23,6 +23,10 @@ updates:
       # `npm ci` (ERESOLVE). Move eslint and eslint-plugin-vue together.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # Tailwind 4 moves the PostCSS plugin to @tailwindcss/postcss and replaces
+      # tailwind.config.js; the Vite build fails until that migration is done.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
   # Base images in docker/Dockerfile*
   - package-ecosystem: docker
     directory: "/docker"
