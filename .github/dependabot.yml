@@ -9,6 +9,12 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Inertia 3 is a paired migration: the server adapter (inertia-laravel 3)
+      # and the client (@inertiajs/vue3 3) must move together, so a lone bump of
+      # either breaks the app. Do it as one deliberate PR.
+      - dependency-name: "inertiajs/inertia-laravel"
+        update-types: ["version-update:semver-major"]
   # Frontend/JS dependencies (root package.json)
   - package-ecosystem: npm
     directory: "/"
@@ -22,6 +28,12 @@ updates:
       # eslint-plugin-vue 9 only peers eslint <= 9, so an ESLint 10 bump fails
       # `npm ci` (ERESOLVE). Move eslint and eslint-plugin-vue together.
       - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # Tailwind 4 moves the PostCSS plugin to @tailwindcss/postcss and replaces
+      # tailwind.config.js; the Vite build fails until that migration is done.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@inertiajs/vue3"
         update-types: ["version-update:semver-major"]
   # Base images in docker/Dockerfile*
   - package-ecosystem: docker
