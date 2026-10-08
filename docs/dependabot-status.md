@@ -24,6 +24,7 @@ _Last updated: 2026-10-08. Maintained during the Dependabot clean-up pass; updat
 - `package.json` carries an `overrides` entry pinning `postcss-selector-parser` to `^7.1.6` to clear GHSA-rj75-hqrm-r3gf; drop it once upstream ranges allow the fixed version.
 - `.gitleaksignore` (added 2026-10-08): one fingerprint, a prose line that lists which secrets are kept in environment variables, in `docs/project-memory/08-deployment-and-operations.md` (commit c23f6657). CI's gitleaks job only scans new commits, so it never failed; a full-history scan did.
 - When documenting a gitleaks false positive, describe it rather than quoting it. The first version of this note quoted the flagged prose, and the PR's own gitleaks check failed on the quote.
+- Every workflow declares a top-level `permissions: contents: read` (added 2026-10-08, rescan cycle 3). Jobs that need more, such as CodeQL's `security-events: write`, declare it at job level.
 - Merge policy (deliberate choice by the repo owner, 2026-10-08): every PR, major-version dependency bumps included, is merged as soon as all of its required checks are green, confirmed per PR. This repo is a code showcase with no business or sensitive dependency, so green checks are the only gate. Red, pending or conflicted PRs are fixed or closed instead.
 
 ## Deferred (not re-raised each pass)
