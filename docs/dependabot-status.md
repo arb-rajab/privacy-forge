@@ -4,10 +4,10 @@ _Last updated: 2026-10-08. Maintained during the Dependabot clean-up pass; updat
 
 ## Configuration
 
-- Ecosystems covered: composer (`/`), npm (`/`), docker (`/docker`), github-actions (`/`).
+- Ecosystems covered: composer (`/`), npm (`/`), docker (`/docker`), github-actions (`/`), docker-compose (`/`).
 - Grouping: `minor-and-patch` for every ecosystem (open-PR limit 5 each).
 - Schedule: weekly.
-- Ignore rules: composer: `inertiajs/inertia-laravel` majors (paired with `@inertiajs/vue3`, which also ignores majors); npm: `eslint` majors (eslint-plugin-vue 9 peers eslint <= 9), `eslint-plugin-vue` majors (10 drops the legacy eslintrc presets), `tailwindcss` majors (4 moves the PostCSS plugin), `@inertiajs/vue3` majors.
+- Ignore rules: composer: `inertiajs/inertia-laravel` majors (paired with `@inertiajs/vue3`, which also ignores majors); npm: `eslint` majors (eslint-plugin-vue 9 peers eslint <= 9), `eslint-plugin-vue` majors (10 drops the legacy eslintrc presets), `tailwindcss` majors (4 moves the PostCSS plugin), `@inertiajs/vue3` majors; docker-compose image majors (stateful services need a deliberate migration).
 
 ## State at last update
 
