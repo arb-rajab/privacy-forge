@@ -13,7 +13,7 @@ permissions:
 jobs:
   dependency-governance:
     name: Framework version changes require a decision record
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v7
@@ -42,7 +42,7 @@ jobs:
 
   secrets-scan:
     name: Secret scanning (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -54,7 +54,7 @@ jobs:
 
   php-quality:
     name: PHP lint, static analysis, and tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -160,7 +160,7 @@ jobs:
     # runs) has no effect here one way or the other; noted so a future
     # session doesn't assume this job needs updating to match.
     name: End-to-end (consent widget + DSAR portal, Pest Browser Testing)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -263,7 +263,7 @@ jobs:
 
   js-quality:
     name: Frontend lint and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -291,7 +291,7 @@ jobs:
 
   openapi-validate:
     name: Validate OpenAPI contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -308,7 +308,7 @@ jobs:
 
   dependency-scan:
     name: Dependency vulnerability scan (osv-scanner)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Run osv-scanner
@@ -320,7 +320,7 @@ jobs:
 
   codeql:
     name: CodeQL analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
     strategy:
